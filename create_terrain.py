@@ -16,9 +16,12 @@ from panda3d.core import NodePath, Point3, Vec3, Vec2, BitMask32, Quat
 # from panda3d.core import GeoMipTerrain
 # from panda3d.core import RenderAttrib, AlphaTestAttrib
 
-from walker import Walker, Motions
+# from walker import Walker, Motions
+from walker_for_coding import Walker, Motions
 from constants import Mask
 from scene import Scene
+from lights import BasicAmbientLight, BasicDayLight, BasicSpotLight
+# from seeker import Seeker, Motions
 
 
 load_prc_file_data("", """
@@ -57,7 +60,16 @@ class TestTerrain(ShowBase):
         self.scene.reparent_to(self.render)
 
         self.walker = Walker(self.world)
+        # self.walker = Seeker(self.world)
         self.walker.reparent_to(self.render)
+
+        # self.ambient_light = BasicAmbientLight()
+        # self.basic_light = BasicDayLight()
+
+        # self.spot_light = BasicSpotLight()
+        # self.spot_light.set_pos_hpr(self.walker.actor, Point3(0, 0.3, 1), Vec3(0, 0, 0))
+        # self.spot_light.reparent_to(self.walker.direction_nd)
+
 
         self.floater = NodePath('floater')
         self.floater.set_z(3.0)
@@ -67,6 +79,7 @@ class TestTerrain(ShowBase):
         self.camera.set_pos(self.walker.navigate())
         # self.camera.set_z(50)
         self.camera.look_at(self.floater)
+        self.camLens.set_near_far(0.2, 10000)
         self.camLens.set_fov(90)
 
         self.state = False
@@ -75,6 +88,16 @@ class TestTerrain(ShowBase):
         inputState.watch_with_modifiers('backward', 'arrow_down')
         inputState.watch_with_modifiers('left', 'arrow_left')
         inputState.watch_with_modifiers('right', 'arrow_right')
+
+        inputState.watch_with_modifiers('up', 'b')
+        inputState.watch_with_modifiers('down', 'n')
+
+        # inputState.watch_with_modifiers('forward', 'w')
+        # inputState.watch_with_modifiers('backward', 's')
+        # inputState.watch_with_modifiers('left', 'a')
+        # inputState.watch_with_modifiers('right', 'd')
+        # inputState.watch_with_modifiers('up', 'arrow_up')
+        # inputState.watch_with_modifiers('down', 'arrow_down')
 
         self.accept('x', self.positioning, ['x', True])
         self.accept('shift-x', self.positioning, ['x', False])
@@ -89,23 +112,34 @@ class TestTerrain(ShowBase):
         self.accept('r', self.positioning, ['r', True])
         self.accept('shift-r', self.positioning, ['r', False])
 
+        self.accept('u', self.go_down, [True])
+        self.accept('shift-u', self.go_down, [False])
+
         self.accept('i', self.print_info)
         self.accept('escape', sys.exit)
-        self.accept('d', self.toggle_debug)
+        self.accept('m', self.toggle_debug)
         self.accept('mouse1', self.mouse_click)
         self.accept('mouse1-up', self.mouse_release)
         self.taskMgr.add(self.update, 'update')
 
+    def go_down(self, is_down):
+        direction = 1
+        if is_down:
+            direction *= -1
+        z = self.walker.get_z() + direction
+        self.walker.set_z(z)
+    
+    
     def positioning(self, target, increment):
         pos = Point3()
         hpr = Vec3()
 
         match target:
             case 'x':
-                x = 1 if increment else -1
+                x = 0.1 if increment else -0.1
                 pos.x = x
             case 'y':
-                y = 1 if increment else -1
+                y = 0.1 if increment else -0.1
                 pos.y = y
             case 'z':
                 z = 1 if increment else -1
@@ -120,11 +154,15 @@ class TestTerrain(ShowBase):
                 r = 1 if increment else -1
                 hpr.z = r
 
-        pos = self.scene.cave.get_pos() + pos
-        hpr = self.scene.cave.get_hpr() + hpr
-        print(pos, hpr)  
+        # pos = self.scene.rock.get_pos() + pos
+        # hpr = self.scene.rock.get_hpr() + hpr
+        # print(pos, hpr)
+        # self.scene.rock.set_pos_hpr(pos, hpr)
 
-        self.scene.cave.set_pos_hpr(pos, hpr)
+        pos = self.scene.sensor.get_pos() + pos
+        hpr = self.scene.sensor.get_hpr() + hpr
+        print(pos, hpr)
+        self.scene.sensor.set_pos_hpr(pos, hpr)
 
     def print_info(self):
         print(self.walker.get_pos())
@@ -144,92 +182,6 @@ class TestTerrain(ShowBase):
         self.dragging = False
         self.before_mouse_pos.x = 0
         self.before_mouse_pos.y = 0
-
-    # def generate_terrain(self):
-    #     self.terrain_root = NodePath(BulletRigidBodyNode('terrain_root'))
-    #     self.terrain_root.node().set_mass(0)
-    #     self.terrain_root.set_collide_mask(BitMask32.bit(1))
-    #     self.terrain_root.reparent_to(self.render)
-    #     heightmap = 'output3.png'
-    #     height = 100
-
-    #     # greater_filter = AlphaTestAttrib.make(RenderAttrib.M_greater, 0.5)
-    #     # self.terrain_root.set_attrib(greater_filter)
-
-    #     img = PNMImage(Filename(heightmap))
-    #     shape = BulletHeightfieldShape(self.loader.load_texture(heightmap), height, ZUp)
-    #     shape = BulletHeightfieldShape(img, height, ZUp)
-    #     shape.set_use_diamond_subdivision(True)
-    #     self.terrain_root.node().add_shape(shape)
-
-    #     self.terrain = GeoMipTerrain('geomip_terrain')
-    #     self.terrain.set_heightfield(heightmap)
-    #     self.terrain.set_border_stitching(True)
-    #     self.terrain.set_block_size(8)
-    #     self.terrain.set_min_level(2)
-    #     self.terrain.set_focal_point(self.camera)
-
-    #     size_x, size_y = img.get_size()
-    #     x = (size_x - 1) / 2
-    #     y = (size_y - 1) / 2
-
-    #     pos = Point3(-x, -y, -(height / 2))
-    #     scale = Vec3(1, 1, height)
-    #     self.root = self.terrain.get_root()
-    #     self.root.set_scale(scale)
-    #     self.root.set_pos(pos)
-
-    #     self.terrain.generate()
-    #     self.root.reparent_to(self.terrain_root)
-    #     # self.root.set_attrib(greater_filter)
-
-    #     # import pdb; pdb.set_trace()
-    #     # np = self.terrain.getBlockNodePath(0, 0)
-    #     # geom = np.node().modifyGeom(0)
-    #     # vdata = geom.modifyVertexData()
-    #     # old_count = vdata.get_num_rows()
-    #     # v_array = vdata.modify_array(0)
-    #     # size = 100 * 8
-    #     # start = 5 * size
-    #     # view = memoryview(v_array).cast('B')
-    #     # view[start:-size] = view[start + size:]
-    #     # vdata.set_num_rows(old_count - 10)
-    #     # tris_prim = geom.modify_primitive(0)
-    #     # old_count = tris_prim.get_num_vertices()
-    #     # start = 5 * 6
-    #     # tris_prim.offset_vertices(-10, start + 6, old_count)
-    #     # tris_array = tris_prim.modify_vertices()
-    #     # view = memoryview(tris_array).cast('B').cast('H')
-    #     # view[start:-6] = view[start + 6:]
-    #     # tris_array.set_num_rows(old_count - 6)
-
-    #     # shapeをつくるタイミングを変えても、何の影響もない。一番最後にしても影響ない。
-    #     # shape = BulletHeightfieldShape(self.loader.load_texture(heightmap), height, ZUp)
-    #     # shape = BulletHeightfieldShape(img, height, ZUp)
-    #     # shape.set_use_diamond_subdivision(True)
-    #     # self.terrain_root.node().add_shape(shape)
-
-
-
-    #     shader = Shader.load(Shader.SL_GLSL, 'shaders/terrain_v.glsl', 'shaders/terrain_f.glsl')
-    #     self.root.set_shader(shader)
-
-    #     tex_files = [
-    #         ('stones_01.jpg', 20),
-    #         ('grass_02.png', 10),
-    #     ]
-
-    #     for i, (file_name, tex_scale) in enumerate(tex_files):
-    #         ts = TextureStage(f'ts{i}')
-    #         ts.set_sort(i)
-    #         self.root.set_shader_input(f'tex_ScaleFactor{i}', tex_scale)
-    #         tex = self.loader.load_texture(f'textures/{file_name}')
-    #         self.root.set_texture(ts, tex)
-
-    #     # i = 2
-    #     # ts = TextureStage(f'ts{i}')
-    #     # ts.set_sort(i)
-    #     self.root.set_shader_input('heightmap', self.loader.load_texture(heightmap))
 
     def rotate_camera(self, mouse_pos, dt):
         angle = Vec3()
@@ -303,6 +255,11 @@ class TestTerrain(ShowBase):
         if inputState.is_set('right'):
             motions.append(Motions.RIGHT)
 
+        if inputState.is_set('up'):
+            motions.append(Motions.UP)
+        if inputState.is_set('down'):
+            motions.append(Motions.DOWN)
+
         self.walker.update(dt, motions)
 
     def find_walker_start_pos(self):
@@ -321,8 +278,9 @@ class TestTerrain(ShowBase):
         if not self.state:
             pos = self.find_walker_start_pos()
             # self.walker.set_pos(pos)
-            self.walker.set_pos(Point3(14.0097, -19.1757, -11.6965))
-            # self.walker.set_pos(Point3(6.05444, 18.5463, 2.06921))
+            # self.walker.set_pos(Point3(20.1233, -13.2348, -12.1671))
+            self.walker.set_pos(Point3(-21.7466, 5.79684, -9.72795))
+            # self.walker.set_pos(Point3(-20.6642, 14.9758, -30.88637))
 
             self.state = True
 
@@ -335,6 +293,7 @@ class TestTerrain(ShowBase):
                 if globalClock.get_frame_time() - self.dragging_start_time >= 0.2:
                     self.rotate_camera(mouse_pos, dt)
 
+        self.scene.mid_water.wave(task.time)
         self.world.do_physics(dt)
         return task.cont
 

@@ -29,7 +29,8 @@ class Walker(NodePath):
         super().__init__(BulletRigidBodyNode('wolker'))
         self.world = world
         self.test_shape = BulletSphereShape(0.5)
-        self.moving_direction = 0
+        # self.moving_direction = 0
+        self.go_down = False
 
         h, w = 6, 1.2
         shape = BulletCapsuleShape(w, h - 2 * w, ZUp)
@@ -74,19 +75,26 @@ class Walker(NodePath):
 
         return None
 
+    def check_downward(self, from_pos, distance=-5, mask=1):
+        to_pos = from_pos + Vec3(0, 0, distance)
+
+        if (hit := self.world.ray_test_closest(
+                from_pos, to_pos, BitMask32.bit(mask))).has_hit():
+            # print(hit.get_node().get_name())
+            return hit.get_hit_pos()
+
+        return None
+
     def get_orientation(self):
         return self.direction_nd.get_quat(base.render).get_forward()
 
-    def predict_collision(self, next_pos):
-        ts_from = TransformState.make_pos(self.get_pos())
+    def predict_collision(self, current_pos, next_pos):
+        ts_from = TransformState.make_pos(current_pos)
         ts_to = TransformState.make_pos(next_pos)
-        # result = self.world.sweep_test_closest(self.test_shape, ts_from, ts_to, Mask.nature, 0.0)
-        # result = self.world.sweep_test_closest(
-        #     self.test_shape, ts_from, ts_to, BitMask32.bit(2) | BitMask32.bit(3), 0.0)
-        result = self.world.sweep_test_closest(
-            self.test_shape, ts_from, ts_to, BitMask32.bit(3), 0.0)
 
-        if result.has_hit():
+        if (result := self.world.sweep_test_closest(
+                self.test_shape, ts_from, ts_to, BitMask32.bit(2) | BitMask32.bit(3), 0.0)).has_hit():
+
             return result
 
         # return result.has_hit()
@@ -118,30 +126,48 @@ class Walker(NodePath):
         self.turn(angle)
         self.move(direction, dt)
         self.play_anim(motion)
-        self.moving_direction = direction
+        # self.moving_direction = direction
 
     def turn(self, angle):
         if angle:
             self.direction_nd.set_h(self.direction_nd.get_h() + angle)
 
     def move(self, direction, dt):
+        if self.go_down:
+            distance = 5 * dt
+            self.set_z(self.get_z() - distance)
+            next_pos = self.get_pos() - Vec3(0, 0, distance)
+
+            if self.check_downward(next_pos, -1.5, 3):
+                self.go_down = False
+
+            self.set_pos(next_pos)
+            return
+
         # Not move, if direction is 0.
         if not direction:
             return
 
         speed = 10 if direction < 0 else 5
-        to_pos = self.get_pos() + self.get_orientation() * direction * speed * dt
+        current_pos = self.get_pos()
+        next_pos = current_pos + self.get_orientation() * direction * speed * dt
 
-        if contact_pos := self.get_terrain_contact_pos(to_pos):
-            next_pos = contact_pos + Vec3(0, 0, 1.5)
+        if hit_pos := self.check_downward(next_pos):
+            if self.check_downward(next_pos, mask=5):
+                self.go_down = True
 
-            if result := self.predict_collision(next_pos):
-                if result.get_node() == base.scene.terrain2.node(): 
-                    if self.get_terrain_contact_pos(to_pos, mask=3):
-                        self.set_pos(next_pos)
-            else:
-                self.set_pos(next_pos)
+            next_pos.z = hit_pos.z + 1.5
 
+            if result := self.predict_collision(current_pos, next_pos):
+                if not (result.get_node().get_name().startswith('terrain') and
+                        self.check_downward(next_pos, distance=-10, mask=4)):
+                    return
+
+            self.set_pos(next_pos)
+              
+
+
+        
         # if contact_pos := self.get_terrain_contact_pos(to_pos):
         #     next_pos = contact_pos + Vec3(0, 0, 1.5)
         #     self.set_pos(next_pos)

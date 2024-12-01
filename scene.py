@@ -86,16 +86,22 @@ class Cave(NodePath):
         base_nd = maker.get_geom_node()
 
         for parts_maker, axis_vec, bottom_center, rotation_deg in parts:
-            parts_nd = parts_maker.get_geom_node()
-            vdata_mem, vert_cnt, prim_mem = maker.get_transformed_geomtry_data(
-                parts_nd, axis_vec, bottom_center, rotation_deg)
+            geom_nd = parts_maker.get_geom_node()
+            geom = geom_nd.modify_geom(0)
+            vdata = geom.modify_vertex_data()
+            maker.tranform_vertices(vdata, axis_vec, bottom_center, rotation_deg)
+            vert_cnt = vdata.get_num_rows()
+            vdata_mem = memoryview(vdata.modify_array(0)).cast('B').cast('f')
+            prim = geom.modify_primitive(0)
+            prim_array = prim.modify_vertices()
+            prim_mem = memoryview(prim_array).cast('B').cast('H')
             maker.add(base_nd, vdata_mem, vert_cnt, prim_mem)
 
         model = maker.modeling(base_nd)
         return model
 
 
-class Tunnel(NodePath):
+class SquareTunnel(NodePath):
 
     def __init__(self, mask=3):
         super().__init__(BulletRigidBodyNode('tunnel'))
@@ -118,9 +124,10 @@ class Tunnel(NodePath):
             [gate_maker, Point3(-10.9222, 9.36504, 1.45235), Vec3(31, 0, 0)]
         ]
 
-        for parts_maker, pos, hpr in parts:
+        for i, (parts_maker, pos, hpr) in enumerate(parts):
             model = parts_maker.create()
             model.set_pos_hpr(pos, hpr)
+            model.set_name(f'tunnel_{i}')
             model.reparent_to(self)
 
             mesh = BulletTriangleMesh()
@@ -129,73 +136,36 @@ class Tunnel(NodePath):
             self.node().add_shape(shape, TransformState.make_pos_hpr(pos, hpr))
 
 
-class SecretPassage(NodePath):
+class RoundTunnel(NodePath):
 
-    def __init__(self, mask=1):
+    def __init__(self, mask=3):
         super().__init__(BulletRigidBodyNode('curved_tunnel'))
-        self.model = self.create_model()
-        self.model.reparent_to(self)
-
-        mesh = BulletTriangleMesh()
-        mesh.add_geom(self.model.node().get_geom(0))
-        shape = BulletTriangleMeshShape(mesh, dynamic=False)
-        self.node().add_shape(shape)
+        self.create_model()
         self.set_collide_mask(BitMask32.bit(mask))
 
         tex = base.loader.load_texture('textures/metalboard.jpg')
         self.set_texture(tex)
 
     def create_model(self):
-        # cylinder_geom_nd = Cylinder(
-        #     radius=4.0,
-        #     inner_radius=3.0,
-        #     height=5
-        # ).get_geom_node()
+        maker_1 = Cylinder(radius=2, inner_radius=1.5, height=45)
+        maker_2 = Torus(ring_radius=5.0, section_radius=2.0,
+                        section_inner_radius=1.5, ring_slice_deg=270)
 
-        c_maker = Cylinder(
-            radius=2,
-            inner_radius=1.5,
-            height=10
-        )
+        parts = [
+            [maker_1, Point3(0, 0, 0), Vec3(0, 180, 0)],
+            # [maker_2, Point3(0, 5, -10), Vec3(0, 0, 90)]
+        ]
 
-        main_geom_nd = c_maker.get_geom_node()
+        for i, (parts_maker, pos, hpr) in enumerate(parts):
+            model = parts_maker.create()
+            model.set_pos_hpr(pos, hpr)
+            model.set_name(f'tunnel_{i}')
+            model.reparent_to(self)
 
-        maker = Torus(
-            ring_radius=5.0,
-            section_radius=2.,
-            section_inner_radius=1.5,
-            ring_slice_deg=270
-        )
-
-        main_geom_nd = maker.get_geom_node()
-
-        geom_nd = c_maker.get_geom_node()
-        geom = geom_nd.modify_geom(0)
-        vdata = geom.modify_vertex_data()
-        maker.tranform_vertices(vdata, Vec3(0, 1, 0), Point3(5, 0, 0), 180)
-        vert_cnt = vdata.get_num_rows()
-        vdata_mem = memoryview(vdata.modify_array(0)).cast('B').cast('f')
-        prim = geom.modify_primitive(0)
-        prim_array = prim.modify_vertices()
-        prim_mem = memoryview(prim_array).cast('B').cast('H')
-        maker.add(main_geom_nd, vdata_mem, vert_cnt, prim_mem)
-
-
-        # geom_nd = maker.get_geom_node()
-        # geom = geom_nd.modify_geom(0)
-        # vdata = geom.modify_vertex_data()
-        # maker.tranform_vertices(vdata, Vec3(1, 0, 0), Point3(0, 24, 0), -90)
-        # # maker.tranform_vertices(vdata, Vec3(0, 0, 1), Point3(16, 0, 0), 180)
-        # vert_cnt = vdata.get_num_rows()
-        # vdata_mem = memoryview(vdata.modify_array(0)).cast('B').cast('f')
-        # prim = geom.modify_primitive(0)
-        # prim_array = prim.modify_vertices()
-        # prim_mem = memoryview(prim_array).cast('B').cast('H')
-        # maker.add(main_geom_nd, vdata_mem, vert_cnt, prim_mem)
-
-        
-        model = maker.modeling(main_geom_nd)
-        return model
+            mesh = BulletTriangleMesh()
+            mesh.add_geom(model.node().get_geom(0))
+            shape = BulletTriangleMeshShape(mesh, dynamic=False)
+            self.node().add_shape(shape, TransformState.make_pos_hpr(pos, hpr))
 
 
 class Terrain(NodePath):
@@ -293,6 +263,25 @@ class Terrain(NodePath):
         # shape = BulletHeightfieldShape(img, height, ZUp)
         # shape.set_use_diamond_subdivision(True)
         # self.terrain_root.node().add_shape(shape)
+
+class Sensor(NodePath):
+
+    def __init__(self, name, width, depth, mask=4):
+        super().__init__(BulletRigidBodyNode(f'sensor_{name}'))
+        self.model = Plane(width, depth, segs_w=4, segs_d=4).create()
+        self.model.set_transparency(TransparencyAttrib.MAlpha)
+        # self.model.set_color(1, 1, 1, 1)
+        self.model.set_color(1, 1, 1, 0)
+        self.model.reparent_to(self)
+
+        mesh = BulletTriangleMesh()
+        mesh.add_geom(self.model.node().get_geom(0))
+        shape = BulletTriangleMeshShape(mesh, dynamic=False)
+        self.node().add_shape(shape)
+
+        self.node().set_mass(0)
+        self.set_collide_mask(BitMask32.bit(mask))
+        self.set_shader_off()
 
 
 class WaterSurface(NodePath):
@@ -402,13 +391,13 @@ class Scene(NodePath):
             ('stone_01.jpg', 10),
             ('grass_03.jpg', 10),
         ]
-        # self.top_mountains = Terrain('top_terrain.png', 100, tex_files, mask=2)
-        self.top_mountains = Terrain('test200.png', 100, tex_files, mask=2)
+        self.top_mountains = Terrain('top_terrain.png', 100, tex_files, mask=2)
+        # self.top_mountains = Terrain('test200.png', 100, tex_files, mask=2)
         self.top_mountains.root.set_two_sided(True)
         self.attach_nature(self.top_mountains)
         self.top_mountains.set_z(0)
 
-        self.tunnel = Tunnel()
+        self.tunnel = SquareTunnel()
         self.attach_nature(self.tunnel)
         self.tunnel.set_pos(Point3(-7.8244, -7.0682, -10.6803))
 
@@ -420,9 +409,9 @@ class Scene(NodePath):
         self.attach_nature(self.small_cave)
         self.small_cave.set_pos_hpr(Point3(-18.5, 20.8, -12), Vec3(-7, -24, 0))
 
-        self.secret_passage = SecretPassage()
+        self.secret_passage = RoundTunnel()
         self.attach_nature(self.secret_passage)
-        self.secret_passage.set_pos_hpr(Point3(-24, 18.1963, -21.5), Vec3(0, 90, 0))
+        self.secret_passage.set_pos_hpr(Point3(-18.85, 18.2, -11.5), Vec3(180, 0, 0))
 
         rocks = [
             # cave
@@ -441,30 +430,28 @@ class Scene(NodePath):
             rock.set_pos_hpr(pos, hpr)
             self.attach_nature(rock)
 
-        # rocks = [
-        #     # cave
-        #     [1, 5, Point3(26.2767, -2.03341, -17.0633), Vec3(0, 0, 0)],
-        #     # [3, 14, Point3(35.2767, -4.03341, -17.0633), Vec3(11, -36, 8)],
-            
-        #     # # curved tunel
-        #     # [2, 10, Point3(-22.3955, 18.6311, -12.1399), Vec3(0, -25, 6)],
-        #     # [2, 10, Point3(-15.3955, 17.6311, -12.1399), Vec3(57, -21, 23)],
-        #     # # tunnel
-        #     # [3, 16, Point3(-20.5309, 7.67246, -13.7402), Vec3(13, 46, 8)],
-        #     # [3, 10, Point3(-26.5309, 0.67246, -13.7402), Vec3(0, 32, 0)],
-        #     # [3, 20, Point3(2.054, -24.7472, -14.9398), Vec3(10, -27, -16)],
-        #     # [3, 20, Point3(10.054, -16.7472, -14.9398), Vec3(45, -33, -23)],
-        # ]
-        # for i, (r, h, pos, hpr) in enumerate(rocks):
-        #     if i == 0:
-        #         self.rock = Rock(r, h, f'top_{i}', 'textures/stone_01.jpg')
-        #         self.rock.set_pos_hpr(pos, hpr)
-        #         self.attach_nature(self.rock)
-        #         continue
+        sensors = [
+            [1.5, 1.5, 5, Point3(-18.85, 18.2, -11.5), Vec3(-8, 0, 0)],
+            [3, 4, 4, Point3(-18.8616, 17.5443, -11.5), Vec3(-8, 0, 0)],
+            [4, 6, 4, Point3(31.179, -2.85926, -15.7665), Vec3(-22, 0, 0)],
+            [2, 6, 4, Point3(5.4917, -17.8313, -14.3056), Vec3(64, 0, 0)],
+            [2, 4, 4, Point3(-19.2, 3.09684, -11.728), Vec3(31, 0, 0)],
+        ]
 
-        #     rock = Rock(r, h, f'top_{i}', 'textures/stone_01.jpg')
-        #     rock.set_pos_hpr(pos, hpr)
-        #     self.attach_nature(rock)
+        self.sensors = NodePath('sensors')
+        self.sensors.reparent_to(self)
+
+        for i, (width, depth, mask, pos, hpr) in enumerate(sensors):
+            if i == 0:
+                self.sensor = Sensor(i, width, depth, mask=mask)
+                self.sensor.set_pos_hpr(pos, hpr)
+                self.attach_nature(self.sensor)
+                continue
+
+            sensor = Sensor(i, width, depth, mask=mask)
+            sensor.set_pos_hpr(pos, hpr)
+            self.attach_nature(sensor)
+
 
     def create_middle_layer(self):
         tex_files = [
