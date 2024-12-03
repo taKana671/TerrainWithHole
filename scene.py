@@ -101,17 +101,30 @@ class Cave(NodePath):
         return model
 
 
-class SquareTunnel(NodePath):
+class Tunnel(NodePath):
+
+    def __init__(self, name, mask):
+        super().__init__(BulletRigidBodyNode(name))
+        self.set_collide_mask(BitMask32.bit(mask))
+        self.build_tunnel()
+
+    def setup_model(self, model, name, pos, hpr):
+        model.set_pos_hpr(pos, hpr)
+        model.set_name(name)
+        model.reparent_to(self)
+
+        mesh = BulletTriangleMesh()
+        mesh.add_geom(model.node().get_geom(0))
+        shape = BulletTriangleMeshShape(mesh, dynamic=False)
+        self.node().add_shape(shape, TransformState.make_pos_hpr(pos, hpr))
+
+
+class SquareTunnel(Tunnel):
 
     def __init__(self, mask=3):
-        super().__init__(BulletRigidBodyNode('tunnel'))
-        self.set_collide_mask(BitMask32.bit(mask))
-        self.create_model()
+        super().__init__('square_tunnel', mask)
 
-        tex = base.loader.load_texture('textures/tile2.jpg')
-        self.set_texture(tex)
-
-    def create_model(self):
+    def build_tunnel(self):
         tunnel_maker = Box(width=5, depth=30, height=5, segs_w=5, segs_d=30, segs_z=5,
                            open_bottom=True, open_front=True, open_back=True)
 
@@ -126,46 +139,35 @@ class SquareTunnel(NodePath):
 
         for i, (parts_maker, pos, hpr) in enumerate(parts):
             model = parts_maker.create()
-            model.set_pos_hpr(pos, hpr)
-            model.set_name(f'tunnel_{i}')
-            model.reparent_to(self)
+            self.setup_model(model, f'parts_{i}', pos, hpr)
 
-            mesh = BulletTriangleMesh()
-            mesh.add_geom(model.node().get_geom(0))
-            shape = BulletTriangleMeshShape(mesh, dynamic=False)
-            self.node().add_shape(shape, TransformState.make_pos_hpr(pos, hpr))
+        tex = base.loader.load_texture('textures/tile2.jpg')
+        self.set_texture(tex)
 
 
-class RoundTunnel(NodePath):
+class RoundTunnel(Tunnel):
 
     def __init__(self, mask=3):
-        super().__init__(BulletRigidBodyNode('curved_tunnel'))
-        self.create_model()
-        self.set_collide_mask(BitMask32.bit(mask))
+        super().__init__('round_tunnel', mask)
+
+    def build_tunnel(self):
+        model = Box(width=4, depth=4, height=2, segs_w=4, segs_d=4, segs_z=2,
+                    thickness=1, open_bottom=True, open_top=True).create()
+        self.setup_model(model, 'parts_1', Point3(0, 0, 0), Vec3(180, 5, -8))
+
+        model = Cylinder(radius=1.5, height=43.5, segs_top_cap=0, segs_bottom_cap=0).create()
+        self.setup_model(model, 'parts_2', Point3(0, 0, 0), Vec3(0, 180, 0))
+
+        model = Box(width=4, depth=4, height=4, segs_w=4, segs_d=4, segs_z=4,
+                    thickness=1, open_bottom=True, open_top=True).create()
+        self.setup_model(model, 'parts_3', Point3(0, 0, -42.5), Vec3(0, 0, 0))
+
+        model = Box(width=4, depth=4, height=6, segs_w=4, segs_d=4, segs_z=6,
+                    thickness=1, open_bottom=True, open_top=True, open_left=True, open_back=True).create()
+        self.setup_model(model, 'parts_4', Point3(0, 0, -47.5), Vec3(0, 0, 0))
 
         tex = base.loader.load_texture('textures/metalboard.jpg')
         self.set_texture(tex)
-
-    def create_model(self):
-        maker_1 = Cylinder(radius=2, inner_radius=1.5, height=45)
-        maker_2 = Torus(ring_radius=5.0, section_radius=2.0,
-                        section_inner_radius=1.5, ring_slice_deg=270)
-
-        parts = [
-            [maker_1, Point3(0, 0, 0), Vec3(0, 180, 0)],
-            # [maker_2, Point3(0, 5, -10), Vec3(0, 0, 90)]
-        ]
-
-        for i, (parts_maker, pos, hpr) in enumerate(parts):
-            model = parts_maker.create()
-            model.set_pos_hpr(pos, hpr)
-            model.set_name(f'tunnel_{i}')
-            model.reparent_to(self)
-
-            mesh = BulletTriangleMesh()
-            mesh.add_geom(model.node().get_geom(0))
-            shape = BulletTriangleMeshShape(mesh, dynamic=False)
-            self.node().add_shape(shape, TransformState.make_pos_hpr(pos, hpr))
 
 
 class Terrain(NodePath):
@@ -264,30 +266,39 @@ class Terrain(NodePath):
         # shape.set_use_diamond_subdivision(True)
         # self.terrain_root.node().add_shape(shape)
 
+
 class Sensor(NodePath):
 
     def __init__(self, name, width, depth, mask=4):
         super().__init__(BulletRigidBodyNode(f'sensor_{name}'))
-        self.model = Plane(width, depth, segs_w=4, segs_d=4).create()
-        self.model.set_transparency(TransparencyAttrib.MAlpha)
-        # self.model.set_color(1, 1, 1, 1)
-        self.model.set_color(1, 1, 1, 0)
-        self.model.reparent_to(self)
-
-        mesh = BulletTriangleMesh()
-        mesh.add_geom(self.model.node().get_geom(0))
-        shape = BulletTriangleMeshShape(mesh, dynamic=False)
-        self.node().add_shape(shape)
-
+        self.create_sensor(width, depth)
         self.node().set_mass(0)
         self.set_collide_mask(BitMask32.bit(mask))
         self.set_shader_off()
+
+    def create_sensor(self, width, depth):
+        model = Plane(width, depth, segs_w=4, segs_d=4).create()
+        model.set_transparency(TransparencyAttrib.MAlpha)
+        # model.set_color(1, 1, 1, 1)
+        model.set_color(1, 1, 1, 0)
+        model.reparent_to(self)
+
+        mesh = BulletTriangleMesh()
+        mesh.add_geom(model.node().get_geom(0))
+        shape = BulletTriangleMeshShape(mesh, dynamic=False)
+        self.node().add_shape(shape)
 
 
 class WaterSurface(NodePath):
 
     def __init__(self, w=256, d=256, segs_w=16, segs_d=16, mask=1):
         super().__init__(BulletRigidBodyNode('water_surface'))
+        self.create_surface(w, d, segs_w, segs_d)
+        self.node().set_mass(0)
+        self.set_collide_mask(BitMask32.bit(mask))
+        self.set_shader_off()
+
+    def create_surface(self, w, d, segs_w, segs_d):
         plane = Plane(w, d, segs_w, segs_d)
         self.stride = plane.stride
 
@@ -302,10 +313,6 @@ class WaterSurface(NodePath):
         shape = BulletTriangleMeshShape(mesh, dynamic=False)
         self.node().add_shape(shape)
 
-        self.node().set_mass(0)
-        self.set_collide_mask(BitMask32.bit(mask))
-        self.set_shader_off()
-
     def wave(self, time, wave_h=2.0):
         geom_node = self.model.node()
         geom = geom_node.modify_geom(0)
@@ -319,12 +326,18 @@ class WaterSurface(NodePath):
             vdata_mem[i + 2] = z
 
 
-class TriangleRock(NodePath):
+class Rock(NodePath):
 
-    # def __init__(self, radius, height, name, tex_path, mask=3):
     def __init__(self, adjacent, opposite, height, name, tex_path, mask=3):
         super().__init__(BulletRigidBodyNode(f'rock_{name}'))
-        self.model = RightTriangularPrism(
+        self.create_model(adjacent, opposite, height)
+        self.set_collide_mask(BitMask32.bit(mask))
+
+        tex = base.loader.load_texture(tex_path)
+        self.set_texture(tex)
+
+    def create_model(self, adjacent, opposite, height):
+        model = RightTriangularPrism(
             adjacent=adjacent,
             opposite=opposite,
             height=height,
@@ -332,39 +345,9 @@ class TriangleRock(NodePath):
         ).create()
 
         shape = BulletConvexHullShape()
-        shape.add_geom(self.model.node().get_geom(0))
+        shape.add_geom(model.node().get_geom(0))
         self.node().add_shape(shape)
-        self.set_collide_mask(BitMask32.bit(mask))
-
-        tex = base.loader.load_texture(tex_path)
-        self.set_texture(tex)
-        self.model.reparent_to(self)
-
-
-class Block(NodePath):
-
-    def __init__(self, name, tex_path, w=4, d=4, h=4, mask=1):
-        super().__init__(BulletRigidBodyNode(f'rock_{name}'))
-
-      
-
-        self.model = Box(w, d, h).create()
-        # self.model = Cylinder(radius=4, height=1.5, segs_c=3).create()
-
-        # shape = BulletConvexHullShape()
-        # shape.add_geom(self.model.node().get_geom(0))
-        # self.node().add_shape(shape)
-
-        end, tip = self.model.get_tight_bounds()
-        size = tip - end
-        # import pdb; pdb.set_trace()s
-        shape = BulletBoxShape(size / 2)
-        self.node().add_shape(shape)
-        self.set_collide_mask(BitMask32.bit(mask))
-
-        tex = base.loader.load_texture(tex_path)
-        self.set_texture(tex)
-        self.model.reparent_to(self)
+        model.reparent_to(self)
 
 
 class Scene(NodePath):
@@ -392,7 +375,6 @@ class Scene(NodePath):
             ('grass_03.jpg', 10),
         ]
         self.top_mountains = Terrain('top_terrain.png', 100, tex_files, mask=2)
-        # self.top_mountains = Terrain('test200.png', 100, tex_files, mask=2)
         self.top_mountains.root.set_two_sided(True)
         self.attach_nature(self.top_mountains)
         self.top_mountains.set_z(0)
@@ -409,29 +391,21 @@ class Scene(NodePath):
         self.attach_nature(self.small_cave)
         self.small_cave.set_pos_hpr(Point3(-18.5, 20.8, -12), Vec3(-7, -24, 0))
 
-        self.secret_passage = RoundTunnel()
-        self.attach_nature(self.secret_passage)
-        self.secret_passage.set_pos_hpr(Point3(-18.85, 18.2, -11.5), Vec3(180, 0, 0))
+        self.passage = RoundTunnel()
+        self.attach_nature(self.passage)
+        self.passage.set_pos(Point3(-19.05, 17.6, -12))
 
         rocks = [
-            # cave
-
             [6, 8, 1.5, Point3(35.4, -2.83341, -12.0633), Vec3(171, 30, 89)],
-            [6, 9, 1.5, Point3(29, -1.8, -11.8), Vec3(173, 30, 90)],  #-15
+            [6, 9, 1.5, Point3(29, -1.8, -11.8), Vec3(173, 30, 90)],
         ]
         for i, (adjacent, opposite, height, pos, hpr) in enumerate(rocks):
-            if i == 0:
-                self.rock = TriangleRock(adjacent, opposite, height, f'top_{i}', 'textures/stone_01.jpg')
-                self.rock.set_pos_hpr(pos, hpr)
-                self.attach_nature(self.rock)
-                continue
-
-            rock = TriangleRock(adjacent, opposite, height, f'top_{i}', 'textures/stone_01.jpg')
+            rock = Rock(adjacent, opposite, height, f'rock_{i}', 'textures/stone_01.jpg')
             rock.set_pos_hpr(pos, hpr)
             self.attach_nature(rock)
 
         sensors = [
-            [1.5, 1.5, 5, Point3(-18.85, 18.2, -11.5), Vec3(-8, 0, 0)],
+            [1.5, 1.5, 5, Point3(-19.05, 17.6, -11), Vec3(-1.0, 0, 0)],
             [3, 4, 4, Point3(-18.8616, 17.5443, -11.5), Vec3(-8, 0, 0)],
             [4, 6, 4, Point3(31.179, -2.85926, -15.7665), Vec3(-22, 0, 0)],
             [2, 6, 4, Point3(5.4917, -17.8313, -14.3056), Vec3(64, 0, 0)],
@@ -476,3 +450,7 @@ class Scene(NodePath):
         self.mid_water = WaterSurface(d=129, w=129)
         self.attach_nature(self.mid_water)
         self.mid_water.set_z(-60)  # -62
+
+    def get_layer(self, nd):
+        if nd == self.top_ground.node():
+            return self.mid_ground.node()

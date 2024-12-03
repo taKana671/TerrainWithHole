@@ -69,8 +69,8 @@ def add_alpha(output_name, org_img, src_img, alpha=50):
     for i in range(129):
         for j in range(129):
             arr = src_bgr[i, j]
-            if arr[0] == 0 and arr[1] == 255 and arr[2] == 0:
-            # if arr[0] == 255 and arr[1] == 0 and arr[2] == 0:
+            # if arr[0] == 0 and arr[1] == 255 and arr[2] == 0:
+            if arr[0] == 0 and arr[1] == 0 and arr[2] == 255:
                 org_bgra[i, j][3] = alpha
                 # src_bgr[i, j] = org_bgr[i, j] 
 
@@ -86,8 +86,8 @@ def del_shape(output_name, org_img, src_img):
     for i in range(129):
         for j in range(129):
             arr = src_bgr[i, j]
-            # if arr[0] == 0 and arr[1] == 255 and arr[2] == 0:
             if arr[0] == 255 and arr[1] == 0 and arr[2] == 0:
+            # if arr[0] == 237 and arr[1] == 36 and arr[2] == 28:
                 # org_bgra[i, j][3] = alpha
                 src_bgr[i, j] = org_bgr[i, j] 
 
@@ -131,7 +131,7 @@ class DrawShape:
     def draw(self, event, x, y, flags, param):
         match event:
             case cv2.EVENT_LBUTTONDOWN:
-                self.radius = 3
+                self.radius = 1  # 3
                 self.drawing = True
                 self.ix = x
                 self.iy = y
@@ -149,8 +149,14 @@ class DrawShape:
                 self.drawing = False
                 if not self.drawing:
                     if self.mode:
+                        # cv2.circle(self.img, (x, y), self.radius, (0, 0, 255), -1)
                         cv2.circle(self.img, (x, y), self.radius, (0, 255, 0), -1)
-                        # cv2.ellipse(self.img, ((x, y), (self.radius, self.radius), 0), (0, 255, 0), -1)
+                        # cv2.circle(self.img, (x, y), self.radius, (255, 0, 0), -1)
+                        # アンチエイリアスあり
+                        # cv2.circle(self.img, (x, y), self.radius, (0, 255, 0), cv2.FILLED, lineType=cv2.LINE_AA)
+                        # cv2.circle(self.img, (x, y), self.radius, (255, 0, 0), 5, lineType=cv2.LINE_AA)
+
+                       
                         self.center_x = x
                         self.center_y = y
                         print(f'center_x: {self.center_x}, center_y: {self.center_y}')
@@ -159,9 +165,12 @@ class DrawShape:
 
     def increment_radius(self):
         if self.mode:
-            self.radius += 1
-            # cv2.ellipse(self.img, ((self.center_x, self.center_y), (self.radius, self.radius), 0), (0, 255, 0), -1)
+            # cv2.circle(self.img, (self.center_x, self.center_y), self.radius, (0, 0, 255), -1)
             cv2.circle(self.img, (self.center_x, self.center_y), self.radius, (0, 255, 0), -1)
+            # cv2.circle(self.img, (self.center_x, self.center_y), self.radius, (255, 0, 0), -1)
+            # cv2.circle(self.img, (self.center_x, self.center_y), self.radius, (0, 255, 0), cv2.FILLED, lineType=cv2.LINE_AA)
+            # cv2.circle(self.img, (self.center_x, self.center_y), self.radius, (255, 0, 0), 5, lineType=cv2.LINE_AA)
+            self.radius += 1
 
 
 def draw_shape(path, output_file):
@@ -228,8 +237,8 @@ if __name__ == '__main__':
     # test2('output.png')
     # test3('image8_1.png')
     # get_coords('image8_1.png')
-    # draw_shape('test5.png', 'test6.png')
-    # del_shape('test4.png', 'mount3.png', 'test3.png')
-    add_alpha('cliff_terrain6.png', 'mount3.png', 'test6.png', alpha=50)
+    # draw_shape('top_terrain_src_new200.png', 'top_terrain_src_new200.png')
+    # del_shape('top_terrain_src_new200.png', 'top_terrain_org.png', 'top_terrain_src_new2.png')
+    add_alpha('mid_terrain.png', 'mid_terrain_org.png', 'top_ground_src2.png', alpha=50)
     # overlay('image16_20241108221215.png', 'image16_20241108221228.png')
     # inverse('image8_cellular.png')

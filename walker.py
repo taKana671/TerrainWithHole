@@ -6,7 +6,7 @@ from panda3d.bullet import BulletCapsuleShape, ZUp
 from panda3d.bullet import BulletSphereShape
 from panda3d.bullet import BulletRigidBodyNode
 from panda3d.core import PandaNode, NodePath, TransformState
-from panda3d.core import Vec3
+from panda3d.core import Vec2, Vec3
 
 from constants import Config, Mask
 
@@ -29,8 +29,7 @@ class Walker(NodePath):
         super().__init__(BulletRigidBodyNode('wolker'))
         self.world = world
         self.test_shape = BulletSphereShape(0.5)
-        # self.moving_direction = 0
-        self.go_down = False
+        self.destination_nd = None
 
         h, w = 6, 1.2
         shape = BulletCapsuleShape(w, h - 2 * w, ZUp)
@@ -61,28 +60,14 @@ class Walker(NodePath):
            when camera's view is blocked by an object like walls.
         """
         return self.get_relative_point(self.direction_nd, Vec3(0, 10, 2))
-
-    def get_terrain_contact_pos(self, pos=None, mask=1):
-        if not pos:
-            pos = self.get_pos()
-
-        below = pos - Vec3(0, 0, 30)
-        # if (hit := self.world.ray_test_closest(
-        #         pos, below, Mask.environment)).has_hit():
-        if (hit := self.world.ray_test_closest(
-                pos, below, BitMask32.bit(mask))).has_hit():
-            return hit.get_hit_pos()
-
-        return None
+        # return self.get_relative_point(self.direction_nd, Vec3(0, 0, 5))
 
     def check_downward(self, from_pos, distance=-5, mask=1):
         to_pos = from_pos + Vec3(0, 0, distance)
 
         if (hit := self.world.ray_test_closest(
                 from_pos, to_pos, BitMask32.bit(mask))).has_hit():
-            # print(hit.get_node().get_name())
-            return hit.get_hit_pos()
-
+            return hit
         return None
 
     def get_orientation(self):
@@ -97,66 +82,62 @@ class Walker(NodePath):
 
             return result
 
-        # return result.has_hit()
-
-    def detect_collision(self, np):
-        if (result := self.world.contact_test_pair(self.node(), np.node())).get_num_contacts():
+    def detect_collision(self, target_nd):
+        if (result := self.world.contact_test_pair(
+                self.node(), target_nd)).get_num_contacts():
             for con in result.get_contacts():
                 print(con.get_node1())
-            return True
+                return True
 
     def update(self, dt, motions):
-        direction = 0
-        angle = 0
+        direction = Vec2()
         motion = None
 
         if Motions.LEFT in motions:
-            angle += Config.angle * dt
+            direction.x += 1
             motion = Motions.TURN
+
         if Motions.RIGHT in motions:
-            angle -= Config.angle * dt
+            direction.x -= 1
             motion = Motions.TURN
+
         if Motions.FORWARD in motions:
-            direction += Config.forward
+            direction.y += -1
             motion = Motions.FORWARD
+
         if Motions.BACKWARD in motions:
-            direction += Config.backward
+            direction.y += 1
             motion = Motions.BACKWARD
 
-        self.turn(angle)
+        self.turn(direction, dt)
         self.move(direction, dt)
         self.play_anim(motion)
-        # self.moving_direction = direction
 
-    def turn(self, angle):
-        if angle:
+    def turn(self, direction, dt):
+        if direction.x:
+            angle = 100 * direction.x * dt
             self.direction_nd.set_h(self.direction_nd.get_h() + angle)
 
     def move(self, direction, dt):
-        if self.go_down:
-            distance = 5 * dt
-            self.set_z(self.get_z() - distance)
-            next_pos = self.get_pos() - Vec3(0, 0, distance)
+        if self.destination_nd:
+            self.set_z(self.get_z() - 20 * dt)
 
-            if self.check_downward(next_pos, -1.5, 3):
-                self.go_down = False
-
-            self.set_pos(next_pos)
+            if self.detect_collision(self.destination_nd):
+                self.destination_nd = None
             return
 
-        # Not move, if direction is 0.
-        if not direction:
+        if not direction.y:
             return
 
-        speed = 10 if direction < 0 else 5
+        speed = 10 if direction.y < 0 else 5
         current_pos = self.get_pos()
-        next_pos = current_pos + self.get_orientation() * direction * speed * dt
+        next_pos = current_pos + self.get_orientation() * direction.y * speed * dt
 
-        if hit_pos := self.check_downward(next_pos):
+        if hit := self.check_downward(next_pos):
             if self.check_downward(next_pos, mask=5):
-                self.go_down = True
+                self.destination_nd = base.scene.get_layer(hit.get_node())
 
-            next_pos.z = hit_pos.z + 1.5
+            next_pos.z = hit.get_hit_pos().z + 1.5
 
             if result := self.predict_collision(current_pos, next_pos):
                 if not (result.get_node().get_name().startswith('terrain') and
@@ -164,20 +145,6 @@ class Walker(NodePath):
                     return
 
             self.set_pos(next_pos)
-              
-
-
-        
-        # if contact_pos := self.get_terrain_contact_pos(to_pos):
-        #     next_pos = contact_pos + Vec3(0, 0, 1.5)
-        #     self.set_pos(next_pos)
-
-
-            # if not self.predict_collision(next_pos):
-            #     self.set_pos(next_pos)
-        #     else:
-        #         if self.get_terrain_contact_pos(to_pos, mask=3):
-        #             self.set_pos(next_pos)
 
     def play_anim(self, motion):
         match motion:

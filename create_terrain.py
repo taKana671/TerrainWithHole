@@ -16,8 +16,8 @@ from panda3d.core import NodePath, Point3, Vec3, Vec2, BitMask32, Quat
 # from panda3d.core import GeoMipTerrain
 # from panda3d.core import RenderAttrib, AlphaTestAttrib
 
-# from walker import Walker, Motions
-from walker_for_coding import Walker, Motions
+from walker import Walker, Motions
+# from walker_for_coding import Walker, Motions
 from constants import Mask
 from scene import Scene
 from lights import BasicAmbientLight, BasicDayLight, BasicSpotLight
@@ -142,16 +142,16 @@ class TestTerrain(ShowBase):
                 y = 0.1 if increment else -0.1
                 pos.y = y
             case 'z':
-                z = 1 if increment else -1
+                z = 0.1 if increment else -0.1
                 pos.z = z
             case 'h':
-                h = 1 if increment else -1
+                h = 0.1 if increment else -0.1
                 hpr.x = h
             case 'p':
-                p = 1 if increment else -1
+                p = 0.1 if increment else -0.1
                 hpr.y = p
             case 'r':
-                r = 1 if increment else -1
+                r = 0.1 if increment else -0.1
                 hpr.z = r
 
         # pos = self.scene.rock.get_pos() + pos
@@ -279,8 +279,8 @@ class TestTerrain(ShowBase):
             pos = self.find_walker_start_pos()
             # self.walker.set_pos(pos)
             # self.walker.set_pos(Point3(20.1233, -13.2348, -12.1671))
-            self.walker.set_pos(Point3(-21.7466, 5.79684, -9.72795))
-            # self.walker.set_pos(Point3(-20.6642, 14.9758, -30.88637))
+            self.walker.set_pos(Point3(-18.8239, 16.5635, -9.14214))
+            # self.walker.set_pos(Point3(-17.4144, 16.1237, -58.1082))
 
             self.state = True
 
