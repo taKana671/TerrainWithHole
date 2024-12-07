@@ -1,4 +1,5 @@
 import math
+import numpy as np
 
 from panda3d.core import NodePath, PandaNode, BitMask32, Point3, Vec3
 from panda3d.core import Filename, PNMImage
@@ -172,10 +173,13 @@ class RoundTunnel(Tunnel):
 
 class Terrain(NodePath):
 
-    def __init__(self, heightmap, height, tex_files, mask=1):
+    def __init__(self, heightmap, height, tex_files, block_size=8, mask=1, shader=False):
         super().__init__(BulletRigidBodyNode('terrain_root'))
         self.heightmap = heightmap
         self.height = height
+        self.block_size = block_size
+
+        self.use_shader = shader
 
         # self.set_transparency(TransparencyAttrib.MAlpha)
 
@@ -187,44 +191,35 @@ class Terrain(NodePath):
         shape.set_use_diamond_subdivision(True)
         self.node().add_shape(shape)
         self.generate_terrain(tex_files)
+        # self.make_hole()
 
     def generate_terrain(self, tex_files):
-        # greater_filter = AlphaTestAttrib.make(RenderAttrib.M_greater, 0.5)
-        # self.terrain_root.set_attrib(greater_filter)
-
         img = PNMImage(Filename(self.heightmap))
         self.terrain = GeoMipTerrain('geomip_terrain')
         self.terrain.set_heightfield(self.heightmap)
         self.terrain.set_border_stitching(True)
-        self.terrain.set_block_size(8)
+        self.terrain.set_block_size(self.block_size)
         self.terrain.set_min_level(2)
         self.terrain.set_focal_point(base.camera)
-
 
         size_x, size_y = img.get_size()
         x = (size_x - 1) / 2
         y = (size_y - 1) / 2
         # x = size_x / 2 - 0.5
         # y = size_y / 2 - 0.5
-       
+
         pos = Point3(-x, -y, -(self.height / 2))
-        scale = Vec3(1, 1, self.height)
         self.root = self.terrain.get_root()
         self.root.set_sz(self.height)
-
         self.root.set_pos(pos)
-
         self.terrain.generate()
         self.root.reparent_to(self)
 
-
-        shader = Shader.load(Shader.SL_GLSL, 'shaders/terrain_v.glsl', 'shaders/terrain_f.glsl')
+        if self.use_shader:
+            shader = Shader.load(Shader.SL_GLSL, 'shaders/terrain_v2.glsl', 'shaders/terrain_f2.glsl')
+        else:
+            shader = Shader.load(Shader.SL_GLSL, 'shaders/terrain_v.glsl', 'shaders/terrain_f.glsl')
         self.root.set_shader(shader)
-
-        # tex_files = [
-        #     ('stones_01.jpg', 20),
-        #     ('grass_02.png', 10),
-        # ]
 
         for i, (file_name, tex_scale) in enumerate(tex_files):
             ts = TextureStage(f'ts{i}')
@@ -237,34 +232,19 @@ class Terrain(NodePath):
         # ts = TextureStage(f'ts{i}')
         # ts.set_sort(i)
         self.root.set_shader_input('heightmap', base.loader.load_texture(self.heightmap))
-
-    def make_hole(self):
-        pass
         # import pdb; pdb.set_trace()
-        # np = self.terrain.getBlockNodePath(0, 0)
-        # geom = np.node().modifyGeom(0)
-        # vdata = geom.modifyVertexData()
-        # old_count = vdata.get_num_rows()
-        # v_array = vdata.modify_array(0)
-        # size = 100 * 8
-        # start = 5 * size
-        # view = memoryview(v_array).cast('B')
-        # view[start:-size] = view[start + size:]
-        # vdata.set_num_rows(old_count - 10)
-        # tris_prim = geom.modify_primitive(0)
-        # old_count = tris_prim.get_num_vertices()
-        # start = 5 * 6
-        # tris_prim.offset_vertices(-10, start + 6, old_count)
-        # tris_array = tris_prim.modify_vertices()
-        # view = memoryview(tris_array).cast('B').cast('H')
-        # view[start:-6] = view[start + 6:]
-        # tris_array.set_num_rows(old_count - 6)
 
-        # shapeをつくるタイミングを変えても、何の影響もない。一番最後にしても影響ない。
-        # shape = BulletHeightfieldShape(self.loader.load_texture(heightmap), height, ZUp)
-        # shape = BulletHeightfieldShape(img, height, ZUp)
-        # shape.set_use_diamond_subdivision(True)
-        # self.terrain_root.node().add_shape(shape)
+    def make_hole(self, mx, my):
+        # get the vertex data for an individual block in where hole is made.
+        # check the value of mx and my by self.root.ls().
+        block_np = self.terrain.getBlockNodePath(mx, my)
+        geom = block_np.node().modifyGeom(0)
+        vdata = geom.modify_vertex_data()
+        v_array = vdata.modify_array(0)
+
+        # set the vertex data to 0 for all the sides of the triangle to make it not visible.
+        view = memoryview(v_array).cast('B').cast('f')
+        view[:] = np.zeros(len(view), dtype=np.float32)
 
 
 class Sensor(NodePath):
@@ -350,6 +330,74 @@ class Rock(NodePath):
         model.reparent_to(self)
 
 
+class UndergroundShelter(NodePath):
+
+    def __init__(self, mask=1):
+        super().__init__(BulletRigidBodyNode('underground_shelter'))
+        self.set_collide_mask(BitMask32.bit(mask))
+        self.create_model()
+
+    def create_model(self):
+        model = Box(width=4.5, depth=4.5, height=4, segs_w=3, segs_d=3, segs_z=4,
+                    thickness=0.5, open_bottom=True, open_top=True).create()
+
+        pos = Point3(0, 0, 0)
+        hpr = Vec3(180, 0, 0)
+        model.set_pos_hpr(pos, hpr)
+        model.set_name('parts_1')
+        model.reparent_to(self)
+
+        mesh = BulletTriangleMesh()
+        mesh.add_geom(model.node().get_geom(0))
+        shape = BulletTriangleMeshShape(mesh, dynamic=False)
+        self.node().add_shape(shape, TransformState.make_pos_hpr(pos, hpr))
+
+        model = Box(width=13.5, depth=13.5, height=8, segs_w=5, segs_d=5, segs_z=8,
+                    thickness=0.5, open_top=True).create()
+
+        pos = Point3(-4.5, 4.5, -6)
+        hpr = Vec3(180, 0, 0)
+        model.set_pos_hpr(pos, hpr)
+        model.set_name('parts_2')
+        model.reparent_to(self)
+
+        mesh = BulletTriangleMesh()
+        mesh.add_geom(model.node().get_geom(0))
+        shape = BulletTriangleMeshShape(mesh, dynamic=False)
+        self.node().add_shape(shape, TransformState.make_pos_hpr(pos, hpr))
+
+        model = Box(width=9, depth=13.5, height=0.5, segs_w=9, segs_d=5, segs_z=1,
+                    thickness=0.5, open_top=True).create()
+
+        pos = Point3(-6.75, 4.5, -1.75)
+        hpr = Vec3(0, 0, 0)
+        model.set_pos_hpr(pos, hpr)
+        model.set_name('parts_3')
+        model.reparent_to(self)
+
+        mesh = BulletTriangleMesh()
+        mesh.add_geom(model.node().get_geom(0))
+        shape = BulletTriangleMeshShape(mesh, dynamic=False)
+        self.node().add_shape(shape, TransformState.make_pos_hpr(pos, hpr))
+
+        model = Box(width=4.5, depth=9, height=0.5, segs_w=3, segs_d=9, segs_z=1,
+                    thickness=0.5, open_top=True).create()
+
+        pos = Point3(0, 6.75, -1.75)
+        hpr = Vec3(0, 0, 0)
+        model.set_pos_hpr(pos, hpr)
+        model.set_name('parts_3')
+        model.reparent_to(self)
+
+        mesh = BulletTriangleMesh()
+        mesh.add_geom(model.node().get_geom(0))
+        shape = BulletTriangleMeshShape(mesh, dynamic=False)
+        self.node().add_shape(shape, TransformState.make_pos_hpr(pos, hpr))
+
+        tex = base.loader.load_texture('textures/tile2.jpg')
+        self.set_texture(tex)
+
+
 class Scene(NodePath):
 
     def __init__(self):
@@ -362,11 +410,20 @@ class Scene(NodePath):
         base.world.attach(model.node())
 
     def create_top_layer(self):
+        # tex_files = [
+        #     ('grass_05.jpg', 10),
+        #     ('grass_02.png', 20),
+        # ]
+
         tex_files = [
+            ('grass_02.png', 10),
+            ('stone_01.jpg', 10),
             ('grass_05.jpg', 10),
-            ('grass_02.png', 20),
+            ('grass_01.jpg', 20),
         ]
-        self.top_ground = Terrain('top_ground.png', 10, tex_files)
+
+        self.top_ground = Terrain('top_ground.png', 10, tex_files, shader=True)
+        # self.top_ground.root.set_two_sided(True)
         self.attach_nature(self.top_ground)
         self.top_ground.set_z(-12)
 
@@ -432,24 +489,33 @@ class Scene(NodePath):
             ('stone_01.jpg', 10),
             ('grass_03.jpg', 10),
         ]
-        # self.mid_mountains = Terrain('mid_terrain.png', 100, tex_files, mask=2)
-        self.mid_mountains = Terrain('mid_terrain.png', 100, tex_files, mask=1)
+        self.mid_mountains = Terrain('mid_terrain.png', 100, tex_files, mask=2)
+        # self.mid_mountains = Terrain('mid_terrain.png', 100, tex_files, mask=1)
         self.mid_mountains.root.setTwoSided(True)
         self.attach_nature(self.mid_mountains)
         self.mid_mountains.set_z(-48)  #-50
-
+        # self.mid_mountains.set_p(180)
         tex_files = [
             ('stone_01.jpg', 20),
             ('stones_01.jpg', 20),
         ]
 
-        self.mid_ground = Terrain('mid_ground.png', 20, tex_files)
+        self.mid_ground = Terrain('mid_ground.png', 20, tex_files, block_size=4)
+        self.mid_ground.make_hole(6, 10)
+        # block_np = self.terrain.getBlockNodePath(2, 5)  # blocksize=8
         self.attach_nature(self.mid_ground)
         self.mid_ground.set_z(-56)   # -58
 
-        self.mid_water = WaterSurface(d=129, w=129)
-        self.attach_nature(self.mid_water)
-        self.mid_water.set_z(-60)  # -62
+
+        # LPoint3f(-38.7246, -23.3569, -52.5208)
+
+        # self.mid_water = WaterSurface(d=129, w=129)
+        # self.attach_nature(self.mid_water)
+        # self.mid_water.set_z(-60)  # -62
+
+        self.shelter =  UndergroundShelter()
+        self.attach_nature(self.shelter)
+        self.shelter.set_pos(-38.1466, -21.9663, -55.3114)
 
     def get_layer(self, nd):
         if nd == self.top_ground.node():
