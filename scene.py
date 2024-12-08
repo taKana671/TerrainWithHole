@@ -15,67 +15,49 @@ from panda3d.core import RenderAttrib, AlphaTestAttrib, TransparencyAttrib
 from shapes.src import Sphere, Cylinder, Torus, Plane, Box, Cone, RightTriangularPrism
 
 
-class Cave(NodePath):
+class ModelRoot(NodePath):
 
-    def __init__(self, width, depth, wall_height, thickness, mask=3):
-        super().__init__(BulletRigidBodyNode('terrain_root'))
-        self.width = width
-        self.depth = depth
-        self.wall_height = wall_height
-        self.thickness = thickness
-
-        self.model = self.create_model()
-        self.model.reparent_to(self)
-
-        mesh = BulletTriangleMesh()
-        mesh.add_geom(self.model.node().get_geom(0))
-        shape = BulletTriangleMeshShape(mesh, dynamic=False)
-        self.node().add_shape(shape)
+    def __init__(self, name, mask):
+        super().__init__(BulletRigidBodyNode(name))
+        self.node().set_mass(0)
         self.set_collide_mask(BitMask32.bit(mask))
 
-        tex = base.loader.load_texture('textures/concrete_01.jpg')
-        self.set_texture(tex)
-        # self.flatten_strong()
+    def add_trianglemesh_shape(self, model):
+        mesh = BulletTriangleMesh()
+        mesh.add_geom(model.node().get_geom(0))
+        shape = BulletTriangleMeshShape(mesh, dynamic=False)
+        self.node().add_shape(shape)
 
-    def create_model(self):
+    def add_convexhull_shape(self, model):
+        shape = BulletConvexHullShape()
+        shape.add_geom(model.node().get_geom(0))
+        self.node().add_shape(shape)
+
+
+class Cave(ModelRoot):
+
+    def __init__(self, width, depth, wall_height, thickness, mask=3):
+        super().__init__('cave', mask)
+        self.create_model(width, depth, wall_height, thickness)
+
+    def create_model(self, width, depth, wall_height, thickness):
         # side walls
-        maker = Box(
-            width=self.width,
-            depth=self.depth,
-            height=self.wall_height,
-            thickness=self.thickness,
-            open_bottom=True,
-            open_front=True,
-            open_top=True,
-            open_back=True
-        )
+        maker = Box(width=width, depth=depth, height=wall_height, thickness=thickness,
+                    open_bottom=True, open_front=True, open_top=True, open_back=True)
 
-        radius = self.width / 2
-        inner_radius = self.width / 2 - self.thickness
-        half_h = self.wall_height / 2
-        half_d = self.depth / 2
+        radius = width / 2
+        inner_radius = width / 2 - thickness
+        half_h = wall_height / 2
+        half_d = depth / 2
 
         # rear wall
-        rear_wall = Cylinder(
-            radius=radius,
-            inner_radius=inner_radius,
-            height=self.wall_height,
-            segs_a=self.wall_height,
-            ring_slice_deg=180)
-
+        rear_wall = Cylinder(radius=radius, inner_radius=inner_radius, height=wall_height,
+                             segs_a=wall_height, ring_slice_deg=180)
         # round_roof
-        round_roof = Cylinder(
-            radius=radius,
-            inner_radius=inner_radius,
-            height=self.depth,
-            segs_a=self.depth,
-            ring_slice_deg=180)
-
+        round_roof = Cylinder(radius=radius, inner_radius=inner_radius, height=depth,
+                              segs_a=depth, ring_slice_deg=180)
         # rear round roof
-        rear_roof = Sphere(
-            radius=radius,
-            inner_radius=inner_radius,
-            slice_deg=270)
+        rear_roof = Sphere(radius=radius, inner_radius=inner_radius, slice_deg=270)
 
         parts = [
             [rear_wall, Vec3(0, 0, 1), Point3(0, half_d, -half_h), -180],
@@ -99,76 +81,193 @@ class Cave(NodePath):
             maker.add(base_nd, vdata_mem, vert_cnt, prim_mem)
 
         model = maker.modeling(base_nd)
-        return model
+        self.add_trianglemesh_shape(model)
+        model.reparent_to(self)
+
+        tex = base.loader.load_texture('textures/concrete_01.jpg')
+        self.set_texture(tex)
 
 
-class Tunnel(NodePath):
+class Sensor(ModelRoot):
+
+    def __init__(self, name, width, depth, mask=4):
+        super().__init__(f'sensor_{name}', mask)
+        self.create_model(width, depth)
+        self.set_shader_off()
+
+    def create_model(self, width, depth):
+        model = Plane(width, depth, segs_w=4, segs_d=4).create()
+        model.set_transparency(TransparencyAttrib.MAlpha)
+        model.set_color(1, 1, 1, 0)
+        self.add_trianglemesh_shape(model)
+        model.reparent_to(self)
+
+
+class Rock(ModelRoot):
+
+    def __init__(self, name, adjacent, opposite, height, tex_path, mask=3):
+        super().__init__(f'rock_{name}', mask)
+        self.create_model(adjacent, opposite, height, tex_path)
+
+    def create_model(self, adjacent, opposite, height, tex_path):
+        model = RightTriangularPrism(adjacent=adjacent, opposite=opposite, height=height,
+                                     slice_caps_radial=4).create()
+        self.add_convexhull_shape(model)
+        model.reparent_to(self)
+
+        tex = base.loader.load_texture(tex_path)
+        self.set_texture(tex)
+
+
+class WaterSurface(ModelRoot):
+
+    def __init__(self, w=256, d=256, segs_w=16, segs_d=16, mask=1):
+        super().__init__('water_surface', mask)
+        self.create_model(w, d, segs_w, segs_d)
+        self.set_shader_off()
+
+    def create_model(self, w, d, segs_w, segs_d):
+        plane = Plane(w, d, segs_w, segs_d)
+        self.stride = plane.stride
+
+        self.model = plane.create()
+        self.model.set_transparency(TransparencyAttrib.MAlpha)
+        self.model.set_texture(base.loader.load_texture('textures/water.png'))
+        self.model.set_pos(Point3(0, 0, 0))
+
+        self.add_trianglemesh_shape(self.model)
+        self.model.reparent_to(self)
+
+    def wave(self, time, wave_h=1.0):
+        geom_node = self.model.node()
+        geom = geom_node.modify_geom(0)
+        vdata = geom.modify_vertex_data()
+        vdata_arr = vdata.modify_array(0)
+        vdata_mem = memoryview(vdata_arr).cast('B').cast('f')
+
+        for i in range(0, len(vdata_mem), self.stride):
+            x, y = vdata_mem[i: i + 2]
+            z = (math.sin(time + x / wave_h) + math.sin(time + y / wave_h)) * wave_h / 2
+            vdata_mem[i + 2] = z
+
+
+class AssembledModel(ModelRoot):
 
     def __init__(self, name, mask):
-        super().__init__(BulletRigidBodyNode(name))
-        self.set_collide_mask(BitMask32.bit(mask))
-        self.build_tunnel()
+        super().__init__(name, mask)
+        self.assemble_model()
 
-    def setup_model(self, model, name, pos, hpr):
+    def setup_model(self, model, name, pos, hpr, parent=None):
         model.set_pos_hpr(pos, hpr)
         model.set_name(name)
-        model.reparent_to(self)
 
         mesh = BulletTriangleMesh()
         mesh.add_geom(model.node().get_geom(0))
         shape = BulletTriangleMeshShape(mesh, dynamic=False)
         self.node().add_shape(shape, TransformState.make_pos_hpr(pos, hpr))
 
+        if not parent:
+            model.reparent_to(self)
+        else:
+            model.reparent_to(parent)
 
-class SquareTunnel(Tunnel):
+
+class SquareTunnel(AssembledModel):
 
     def __init__(self, mask=3):
         super().__init__('square_tunnel', mask)
 
-    def build_tunnel(self):
-        tunnel_maker = Box(width=5, depth=30, height=5, segs_w=5, segs_d=30, segs_z=5,
-                           open_bottom=True, open_front=True, open_back=True)
+    def assemble_model(self):
+        # tunnel
+        model = Box(width=5, depth=30, height=5, segs_w=5, segs_d=30, segs_z=5,
+                    open_bottom=True, open_front=True, open_back=True).create()
+        self.setup_model(model, 'tunnel', Point3(0, 0, 0), Vec3(51, 5, 0))
 
-        gate_maker = Box(width=6, depth=4, height=6, segs_w=6, segs_d=4, segs_z=6,
-                         thickness=2, open_bottom=True, open_front=True, open_back=True)
+        # hollow rectangular prism that overlaps the hole in the mountain.
+        maker = Box(width=6, depth=4, height=6, segs_w=6, segs_d=4, segs_z=6,
+                    thickness=2, open_bottom=True, open_front=True, open_back=True)
 
-        parts = [
-            [tunnel_maker, Point3(0, 0, 0), Vec3(51, 5, 0)],
-            [gate_maker, Point3(13.0778, -10.635, -0.5477), Vec3(64, 0, 0)],
-            [gate_maker, Point3(-10.9222, 9.36504, 1.45235), Vec3(31, 0, 0)]
-        ]
+        self.setup_model(maker.create(), 'gate_1', Point3(13.0778, -10.635, -0.5477), Vec3(64, 0, 0))
+        self.setup_model(maker.create(), 'gate_2', Point3(-10.9222, 9.36504, 1.45235), Vec3(31, 0, 0))
 
-        for i, (parts_maker, pos, hpr) in enumerate(parts):
-            model = parts_maker.create()
-            self.setup_model(model, f'parts_{i}', pos, hpr)
-
+        # set texture.
         tex = base.loader.load_texture('textures/tile2.jpg')
         self.set_texture(tex)
 
 
-class RoundTunnel(Tunnel):
+class RoundTunnel(AssembledModel):
 
     def __init__(self, mask=3):
         super().__init__('round_tunnel', mask)
 
-    def build_tunnel(self):
+    def assemble_model(self):
+        # hollow rectangular prism that overlaps the hole in the top ground.
         model = Box(width=4, depth=4, height=2, segs_w=4, segs_d=4, segs_z=2,
                     thickness=1, open_bottom=True, open_top=True).create()
-        self.setup_model(model, 'parts_1', Point3(0, 0, 0), Vec3(180, 5, -8))
+        self.setup_model(model, 'hole_1', Point3(0, 0, 0), Vec3(180, 5, -8))
 
+        # tunnel
         model = Cylinder(radius=1.5, height=43.5, segs_top_cap=0, segs_bottom_cap=0).create()
-        self.setup_model(model, 'parts_2', Point3(0, 0, 0), Vec3(0, 180, 0))
+        self.setup_model(model, 'tunnel', Point3(0, 0, 0), Vec3(0, 180, 0))
 
+        # hollow rectangular prism that overlaps the hole in the bottom ground.
         model = Box(width=4, depth=4, height=4, segs_w=4, segs_d=4, segs_z=4,
                     thickness=1, open_bottom=True, open_top=True).create()
-        self.setup_model(model, 'parts_3', Point3(0, 0, -42.5), Vec3(0, 0, 0))
+        self.setup_model(model, 'hole_2', Point3(0, 0, -42.5), Vec3(0, 0, 0))
 
+        # walls
         model = Box(width=4, depth=4, height=6, segs_w=4, segs_d=4, segs_z=6,
                     thickness=1, open_bottom=True, open_top=True, open_left=True, open_back=True).create()
-        self.setup_model(model, 'parts_4', Point3(0, 0, -47.5), Vec3(0, 0, 0))
+        self.setup_model(model, 'wall', Point3(0, 0, -47.5), Vec3(0, 0, 0))
 
+        # set texture.
         tex = base.loader.load_texture('textures/metalboard.jpg')
         self.set_texture(tex)
+
+
+class UndergroundShelter(AssembledModel):
+
+    def __init__(self, mask=1):
+        super().__init__('underground_shelter', mask)
+
+    def assemble_model(self):
+        shelter = NodePath('shelter')
+        shelter.reparent_to(self)
+        steps = NodePath('shelter')
+        steps.reparent_to(self)
+
+        # hollow rectangular prism that overlaps the hole.
+        model = Box(width=4.5, depth=4.5, height=2, segs_w=3, segs_d=3, thickness=0.5,
+                    open_bottom=True, open_top=True).create()
+        self.setup_model(model, 'hole', Point3(0, 0, 0), Vec3(180, 0, 0), shelter)
+
+        # room
+        model = Box(width=13.5, depth=13.5, height=8, segs_w=5, segs_d=5, segs_z=8, thickness=0.5,
+                    open_top=True).create()
+        self.setup_model(model, 'room', Point3(-4.5, 4.5, -5), Vec3(180, 0, 0), shelter)
+
+        # roofs
+        model = Box(width=9, depth=13.5, height=0.5, segs_w=9, segs_d=5, thickness=0.5, open_top=True).create()
+        self.setup_model(model, 'roof_1', Point3(-6.75, 4.5, -0.75), Vec3(0, 0, 0), parent=shelter)
+        model = Box(width=4.5, depth=9, height=0.5, segs_w=3, segs_d=9, thickness=0.5, open_top=True).create()
+        self.setup_model(model, 'roof_2', Point3(0, 6.75, -0.75), Vec3(0, 0, 0), parent=shelter)
+
+        # steps
+        maker = Box(width=3.5, depth=1, height=1)
+        start_z, start_y = -1.5, -1.25
+
+        for i in range(8):
+            model = maker.create()
+            pos = Point3(0, start_y + i, start_z - i)
+            hpr = Vec3(0, 0, 0)
+            name = f'steps_{i}'
+            self.setup_model(model, name, pos, hpr, parent=steps)
+
+        # set texture.
+        tex = base.loader.load_texture('textures/tile2.jpg')
+        shelter.set_texture(tex)
+        tex = base.loader.load_texture('textures/concrete_01.jpg')
+        steps.set_texture(tex)
 
 
 class Terrain(NodePath):
@@ -247,163 +346,13 @@ class Terrain(NodePath):
         view[:] = np.zeros(len(view), dtype=np.float32)
 
 
-class Sensor(NodePath):
-
-    def __init__(self, name, width, depth, mask=4):
-        super().__init__(BulletRigidBodyNode(f'sensor_{name}'))
-        self.create_sensor(width, depth)
-        self.node().set_mass(0)
-        self.set_collide_mask(BitMask32.bit(mask))
-        self.set_shader_off()
-
-    def create_sensor(self, width, depth):
-        model = Plane(width, depth, segs_w=4, segs_d=4).create()
-        model.set_transparency(TransparencyAttrib.MAlpha)
-        # model.set_color(1, 1, 1, 1)
-        model.set_color(1, 1, 1, 0)
-        model.reparent_to(self)
-
-        mesh = BulletTriangleMesh()
-        mesh.add_geom(model.node().get_geom(0))
-        shape = BulletTriangleMeshShape(mesh, dynamic=False)
-        self.node().add_shape(shape)
-
-
-class WaterSurface(NodePath):
-
-    def __init__(self, w=256, d=256, segs_w=16, segs_d=16, mask=1):
-        super().__init__(BulletRigidBodyNode('water_surface'))
-        self.create_surface(w, d, segs_w, segs_d)
-        self.node().set_mass(0)
-        self.set_collide_mask(BitMask32.bit(mask))
-        self.set_shader_off()
-
-    def create_surface(self, w, d, segs_w, segs_d):
-        plane = Plane(w, d, segs_w, segs_d)
-        self.stride = plane.stride
-
-        self.model = plane.create()
-        self.model.set_transparency(TransparencyAttrib.MAlpha)
-        self.model.set_texture(base.loader.load_texture('textures/water.png'))
-        self.model.set_pos(Point3(0, 0, 0))
-        self.model.reparent_to(self)
-
-        mesh = BulletTriangleMesh()
-        mesh.add_geom(self.model.node().get_geom(0))
-        shape = BulletTriangleMeshShape(mesh, dynamic=False)
-        self.node().add_shape(shape)
-
-    def wave(self, time, wave_h=2.0):
-        geom_node = self.model.node()
-        geom = geom_node.modify_geom(0)
-        vdata = geom.modify_vertex_data()
-        vdata_arr = vdata.modify_array(0)
-        vdata_mem = memoryview(vdata_arr).cast('B').cast('f')
-
-        for i in range(0, len(vdata_mem), self.stride):
-            x, y = vdata_mem[i: i + 2]
-            z = (math.sin(time + x / wave_h) + math.sin(time + y / wave_h)) * wave_h / 2
-            vdata_mem[i + 2] = z
-
-
-class Rock(NodePath):
-
-    def __init__(self, adjacent, opposite, height, name, tex_path, mask=3):
-        super().__init__(BulletRigidBodyNode(f'rock_{name}'))
-        self.create_model(adjacent, opposite, height)
-        self.set_collide_mask(BitMask32.bit(mask))
-
-        tex = base.loader.load_texture(tex_path)
-        self.set_texture(tex)
-
-    def create_model(self, adjacent, opposite, height):
-        model = RightTriangularPrism(
-            adjacent=adjacent,
-            opposite=opposite,
-            height=height,
-            slice_caps_radial=4
-        ).create()
-
-        shape = BulletConvexHullShape()
-        shape.add_geom(model.node().get_geom(0))
-        self.node().add_shape(shape)
-        model.reparent_to(self)
-
-
-class UndergroundShelter(NodePath):
-
-    def __init__(self, mask=1):
-        super().__init__(BulletRigidBodyNode('underground_shelter'))
-        self.set_collide_mask(BitMask32.bit(mask))
-        self.create_model()
-
-    def create_model(self):
-        model = Box(width=4.5, depth=4.5, height=4, segs_w=3, segs_d=3, segs_z=4,
-                    thickness=0.5, open_bottom=True, open_top=True).create()
-
-        pos = Point3(0, 0, 0)
-        hpr = Vec3(180, 0, 0)
-        model.set_pos_hpr(pos, hpr)
-        model.set_name('parts_1')
-        model.reparent_to(self)
-
-        mesh = BulletTriangleMesh()
-        mesh.add_geom(model.node().get_geom(0))
-        shape = BulletTriangleMeshShape(mesh, dynamic=False)
-        self.node().add_shape(shape, TransformState.make_pos_hpr(pos, hpr))
-
-        model = Box(width=13.5, depth=13.5, height=8, segs_w=5, segs_d=5, segs_z=8,
-                    thickness=0.5, open_top=True).create()
-
-        pos = Point3(-4.5, 4.5, -6)
-        hpr = Vec3(180, 0, 0)
-        model.set_pos_hpr(pos, hpr)
-        model.set_name('parts_2')
-        model.reparent_to(self)
-
-        mesh = BulletTriangleMesh()
-        mesh.add_geom(model.node().get_geom(0))
-        shape = BulletTriangleMeshShape(mesh, dynamic=False)
-        self.node().add_shape(shape, TransformState.make_pos_hpr(pos, hpr))
-
-        model = Box(width=9, depth=13.5, height=0.5, segs_w=9, segs_d=5, segs_z=1,
-                    thickness=0.5, open_top=True).create()
-
-        pos = Point3(-6.75, 4.5, -1.75)
-        hpr = Vec3(0, 0, 0)
-        model.set_pos_hpr(pos, hpr)
-        model.set_name('parts_3')
-        model.reparent_to(self)
-
-        mesh = BulletTriangleMesh()
-        mesh.add_geom(model.node().get_geom(0))
-        shape = BulletTriangleMeshShape(mesh, dynamic=False)
-        self.node().add_shape(shape, TransformState.make_pos_hpr(pos, hpr))
-
-        model = Box(width=4.5, depth=9, height=0.5, segs_w=3, segs_d=9, segs_z=1,
-                    thickness=0.5, open_top=True).create()
-
-        pos = Point3(0, 6.75, -1.75)
-        hpr = Vec3(0, 0, 0)
-        model.set_pos_hpr(pos, hpr)
-        model.set_name('parts_3')
-        model.reparent_to(self)
-
-        mesh = BulletTriangleMesh()
-        mesh.add_geom(model.node().get_geom(0))
-        shape = BulletTriangleMeshShape(mesh, dynamic=False)
-        self.node().add_shape(shape, TransformState.make_pos_hpr(pos, hpr))
-
-        tex = base.loader.load_texture('textures/tile2.jpg')
-        self.set_texture(tex)
-
-
 class Scene(NodePath):
 
     def __init__(self):
         super().__init__(PandaNode('scene'))
         self.create_top_layer()
         self.create_middle_layer()
+        self.create_sensor()
 
     def attach_nature(self, model):
         model.reparent_to(self)
@@ -457,16 +406,48 @@ class Scene(NodePath):
             [6, 9, 1.5, Point3(29, -1.8, -11.8), Vec3(173, 30, 90)],
         ]
         for i, (adjacent, opposite, height, pos, hpr) in enumerate(rocks):
-            rock = Rock(adjacent, opposite, height, f'rock_{i}', 'textures/stone_01.jpg')
+            rock = Rock(f'rock_{i}', adjacent, opposite, height, 'textures/stone_01.jpg')
             rock.set_pos_hpr(pos, hpr)
             self.attach_nature(rock)
 
+    def create_middle_layer(self):
+        tex_files = [
+            ('stone_01.jpg', 20),
+            ('stones_01.jpg', 20),
+        ]
+
+        self.mid_ground = Terrain('mid_ground.png', 20, tex_files, block_size=4)
+        self.mid_ground.make_hole(6, 10)
+        # block_np = self.terrain.getBlockNodePath(2, 5)  # blocksize=8
+        self.attach_nature(self.mid_ground)
+        self.mid_ground.set_z(-56)   # -58
+
+        tex_files = [
+            ('stone_01.jpg', 10),
+            ('grass_03.jpg', 10),
+        ]
+        self.mid_mountains = Terrain('mid_terrain.png', 100, tex_files, mask=2)
+        self.mid_mountains.root.setTwoSided(True)
+        self.attach_nature(self.mid_mountains)
+        self.mid_mountains.set_z(-48)  #-50
+
+        self.mid_water = WaterSurface(w=64.5, d=129)
+        self.attach_nature(self.mid_water)
+        self.mid_water.set_pos(Point3(32.25, 0, -60))
+        # self.mid_water.set_z(-60)  # -62
+
+        self.shelter = UndergroundShelter()
+        self.attach_nature(self.shelter)
+        self.shelter.set_pos(-38.1466, -21.9663, -54.3114)
+
+    def create_sensor(self):
         sensors = [
-            [1.5, 1.5, 5, Point3(-19.05, 17.6, -11), Vec3(-1.0, 0, 0)],
-            [3, 4, 4, Point3(-18.8616, 17.5443, -11.5), Vec3(-8, 0, 0)],
-            [4, 6, 4, Point3(31.179, -2.85926, -15.7665), Vec3(-22, 0, 0)],
-            [2, 6, 4, Point3(5.4917, -17.8313, -14.3056), Vec3(64, 0, 0)],
-            [2, 4, 4, Point3(-19.2, 3.09684, -11.728), Vec3(31, 0, 0)],
+            [3, 3, 5, Point3(-38.1466, -21.9663, -53.5114), Vec3(0, 0, 0)],  # hole in mid_ground
+            [1.5, 1.5, 5, Point3(-19.05, 17.6, -11), Vec3(-1.0, 0, 0)],      # hole in top_ground
+            [3, 4, 4, Point3(-18.8616, 17.5443, -11.5), Vec3(-8, 0, 0)],     # small cave
+            [4, 6, 4, Point3(31.179, -2.85926, -15.7665), Vec3(-22, 0, 0)],  # big cave
+            [2, 6, 4, Point3(5.4917, -17.8313, -14.3056), Vec3(64, 0, 0)],   # tunnel in the side of the bit cave
+            [2, 4, 4, Point3(-19.2, 3.09684, -11.728), Vec3(31, 0, 0)],      # tunnel in the side of the small cave
         ]
 
         self.sensors = NodePath('sensors')
@@ -483,40 +464,9 @@ class Scene(NodePath):
             sensor.set_pos_hpr(pos, hpr)
             self.attach_nature(sensor)
 
-
-    def create_middle_layer(self):
-        tex_files = [
-            ('stone_01.jpg', 10),
-            ('grass_03.jpg', 10),
-        ]
-        self.mid_mountains = Terrain('mid_terrain.png', 100, tex_files, mask=2)
-        # self.mid_mountains = Terrain('mid_terrain.png', 100, tex_files, mask=1)
-        self.mid_mountains.root.setTwoSided(True)
-        self.attach_nature(self.mid_mountains)
-        self.mid_mountains.set_z(-48)  #-50
-        # self.mid_mountains.set_p(180)
-        tex_files = [
-            ('stone_01.jpg', 20),
-            ('stones_01.jpg', 20),
-        ]
-
-        self.mid_ground = Terrain('mid_ground.png', 20, tex_files, block_size=4)
-        self.mid_ground.make_hole(6, 10)
-        # block_np = self.terrain.getBlockNodePath(2, 5)  # blocksize=8
-        self.attach_nature(self.mid_ground)
-        self.mid_ground.set_z(-56)   # -58
-
-
-        # LPoint3f(-38.7246, -23.3569, -52.5208)
-
-        # self.mid_water = WaterSurface(d=129, w=129)
-        # self.attach_nature(self.mid_water)
-        # self.mid_water.set_z(-60)  # -62
-
-        self.shelter =  UndergroundShelter()
-        self.attach_nature(self.shelter)
-        self.shelter.set_pos(-38.1466, -21.9663, -55.3114)
-
     def get_layer(self, nd):
         if nd == self.top_ground.node():
             return self.mid_ground.node()
+
+        if nd == self.mid_ground.node():
+            return self.shelter.node()
