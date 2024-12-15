@@ -8,7 +8,7 @@ from panda3d.bullet import BulletRigidBodyNode
 from panda3d.core import PandaNode, NodePath, TransformState
 from panda3d.core import Vec2, Vec3
 
-from constants import Config, Mask
+# from constants import Config, Mask
 
 
 class Motions(Enum):
@@ -18,6 +18,7 @@ class Motions(Enum):
     LEFT = auto()
     RIGHT = auto()
     TURN = auto()
+
 
 
 class Walker(NodePath):
@@ -30,6 +31,7 @@ class Walker(NodePath):
         self.world = world
         self.test_shape = BulletSphereShape(0.5)
         self.destination_nd = None
+        self.sensor_nd = None
 
         h, w = 6, 1.2
         shape = BulletCapsuleShape(w, h - 2 * w, ZUp)
@@ -38,7 +40,7 @@ class Walker(NodePath):
         self.node().set_ccd_motion_threshold(1e-7)
         self.node().set_ccd_swept_sphere_radius(0.5)
 
-        self.set_collide_mask(Mask.terrain | Mask.sensor)
+        self.set_collide_mask(BitMask32.bit(1) | BitMask32.bit(4))
         self.set_scale(0.5)
         self.world.attach(self.node())
 
@@ -67,6 +69,7 @@ class Walker(NodePath):
 
         if (hit := self.world.ray_test_closest(
                 from_pos, to_pos, BitMask32.bit(mask))).has_hit():
+            # print(hit.get_node())
             return hit
         return None
 
@@ -86,7 +89,7 @@ class Walker(NodePath):
         if (result := self.world.contact_test_pair(
                 self.node(), target_nd)).get_num_contacts():
             for con in result.get_contacts():
-                print(con.get_node1())
+                # print(con.get_node1())
                 return True
 
     def update(self, dt, motions):
@@ -119,10 +122,13 @@ class Walker(NodePath):
             self.direction_nd.set_h(self.direction_nd.get_h() + angle)
 
     def move(self, direction, dt):
-        if self.destination_nd:
+        if self.sensor_nd:
+
             self.set_z(self.get_z() - 20 * dt)
 
-            if self.detect_collision(self.destination_nd):
+            # if self.detect_collision(self.destination_nd):
+            if self.detect_collision(self.sensor_nd):
+                # import pdb; pdb.set_trace()
                 self.destination_nd = None
             return
 
@@ -134,8 +140,10 @@ class Walker(NodePath):
         next_pos = current_pos + self.get_orientation() * direction.y * speed * dt
 
         if hit := self.check_downward(next_pos):
-            if self.check_downward(next_pos, mask=5):
-                self.destination_nd = base.scene.get_layer(hit.get_node())
+            if sensor := base.scene.check_terrain_hole(next_pos, -5):
+                self.sensor = sensor
+                # walkerがsensorの高さより下になったらpassageに入ったとする。
+                # censorクラスのインスタンスがリターンされるように、check_terrain_holeを修正した。
 
             next_pos.z = hit.get_hit_pos().z + 1.5
 
@@ -145,6 +153,34 @@ class Walker(NodePath):
                     return
 
             self.set_pos(next_pos)
+
+    # def move(self, direction, dt):
+    #     if self.destination_nd:
+    #         self.set_z(self.get_z() - 20 * dt)
+
+    #         if self.detect_collision(self.destination_nd):
+    #             self.destination_nd = None
+    #         return
+
+    #     if not direction.y:
+    #         return
+
+    #     speed = 10 if direction.y < 0 else 5
+    #     current_pos = self.get_pos()
+    #     next_pos = current_pos + self.get_orientation() * direction.y * speed * dt
+
+    #     if hit := self.check_downward(next_pos):
+    #         if self.check_downward(next_pos, mask=5):
+    #             self.destination_nd = base.scene.get_layer(hit.get_node())
+
+    #         next_pos.z = hit.get_hit_pos().z + 1.5
+
+    #         if result := self.predict_collision(current_pos, next_pos):
+    #             if not (result.get_node().get_name().startswith('terrain') and
+    #                     self.check_downward(next_pos, distance=-10, mask=4)):
+    #                 return
+
+    #         self.set_pos(next_pos)
 
     def play_anim(self, motion):
         match motion:
