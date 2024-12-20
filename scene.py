@@ -107,7 +107,7 @@ class SquareTunnel(AssembledModel):
 
     def assemble_model(self):
         # tunnel
-        model = Box(width=5, depth=31, height=5, segs_w=5, segs_d=30, segs_z=5,
+        model = Box(width=4.5, depth=31, height=5, segs_w=5, segs_d=30, segs_z=5,
                     open_bottom=True, open_front=True, open_back=True).create()
         self.setup_model(model, 'tunnel', Point3(0.2, -0.8, -0.1), Vec3(51, 5, 0))
 
@@ -445,8 +445,10 @@ class Scene(NodePath):
         self.sensors = {}
 
         sensors = [
-            [1.5, 1.5, 7, Sensors.ground_b, Point3(-19.05, 17.6, -56.4), Vec3(0, 0, 0)],       # hole in bottom_ground
-            [1.5, 1.5, 6, Sensors.ground_t, Point3(-19.05, 17.6, -12), Vec3(-1.0, 0, 0)],      # hole in top_ground
+            # [1.5, 1.5, 7, Sensors.ground_b, Point3(-19.05, 17.6, -56.4), Vec3(0, 0, 0)],       # hole in bottom_ground
+            # [1.5, 1.5, 6, Sensors.ground_t, Point3(-19.05, 17.6, -12), Vec3(-1.0, 0, 0)],      # hole in top_ground
+            [1.5, 1.5, 5, Sensors.ground_b, Point3(-19.05, 17.6, -56.4), Vec3(0, 0, 0)],       # hole in bottom_ground
+            [1.5, 1.5, 5, Sensors.ground_t, Point3(-19.05, 17.6, -12), Vec3(-1.0, 0, 0)],      # hole in top_ground
             [3, 3, 5, Sensors.basement, Point3(-38.1466, -21.9663, -53.5114), Vec3(0, 0, 0)],  # hole to enter basement
             [4, 6, 4, Sensors.surfase_mt, Point3(32.179, -3.35926, -15.7665), Vec3(-11, 0, 0)],  # big cave
             [3, 4, 4, Sensors.surfase_mt, Point3(-18.8616, 17.5443, -11.5), Vec3(-8, 0, 0)],     # small cave
