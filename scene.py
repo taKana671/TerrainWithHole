@@ -1,5 +1,6 @@
 import math
 import numpy as np
+from enum import Enum
 
 from panda3d.bullet import BulletRigidBodyNode
 from panda3d.bullet import BulletTriangleMeshShape, BulletHeightfieldShape, ZUp
@@ -10,8 +11,18 @@ from panda3d.core import Shader, TextureStage
 from panda3d.core import GeoMipTerrain, TransformState
 from panda3d.core import TransparencyAttrib
 
-from constants import Sensors
+from constants import SensorLocations
 from shapes.src import Sphere, Cylinder, Plane, Box
+
+
+class Sensors(Enum):
+
+    HOLE = ('hole', 5)          # mountain surcase
+    TUNNEL = ('tunnel', 4)      # the entrance of basement
+
+    def __init__(self, location, mask):
+        self.location = location
+        self.mask = mask
 
 
 class ModelRoot(NodePath):
@@ -35,16 +46,17 @@ class ModelRoot(NodePath):
 
 class Sensor(ModelRoot):
 
-    def __init__(self, _id, width, depth, mask=4):
-        super().__init__(f'sensor_{_id}', BitMask32.bit(mask))
+    def __init__(self, _id, sensor, width, depth):
+        super().__init__(f'sensor_{_id}', BitMask32.bit(sensor.mask))
+        # self.set_tag('sensor_type', tag)
+        self.sensor = sensor
         self.create_model(width, depth)
-        # self.node().set_tag(tag)
         self.set_shader_off()
 
     def create_model(self, width, depth):
         model = Plane(width, depth, segs_w=4, segs_d=4).create()
         model.set_transparency(TransparencyAttrib.MAlpha)
-        model.set_color(1, 1, 1, 1)
+        model.set_color(1, 1, 1, 0)
         self.add_trianglemesh_shape(model)
         model.reparent_to(self)
 
@@ -447,26 +459,25 @@ class Scene(NodePath):
         sensors = [
             # [1.5, 1.5, 7, Sensors.ground_b, Point3(-19.05, 17.6, -56.4), Vec3(0, 0, 0)],       # hole in bottom_ground
             # [1.5, 1.5, 6, Sensors.ground_t, Point3(-19.05, 17.6, -12), Vec3(-1.0, 0, 0)],      # hole in top_ground
-            [1.5, 1.5, 5, Sensors.ground_b, Point3(-19.05, 17.6, -56.4), Vec3(0, 0, 0)],       # hole in bottom_ground
-            [1.5, 1.5, 5, Sensors.ground_t, Point3(-19.05, 17.6, -12), Vec3(-1.0, 0, 0)],      # hole in top_ground
-            [3, 3, 5, Sensors.basement, Point3(-38.1466, -21.9663, -53.5114), Vec3(0, 0, 0)],  # hole to enter basement
-            [4, 6, 4, Sensors.surfase_mt, Point3(32.179, -3.35926, -15.7665), Vec3(-11, 0, 0)],  # big cave
-            [3, 4, 4, Sensors.surfase_mt, Point3(-18.8616, 17.5443, -11.5), Vec3(-8, 0, 0)],     # small cave
-            [2, 6, 4, Sensors.surfase_mt, Point3(5.4917, -17.8313, -14.3056), Vec3(64, 0, 0)],   # tunnel in the side of the bit cave
-            [2, 4, 4, Sensors.surfase_mt, Point3(-19.2, 3.09684, -11.728), Vec3(31, 0, 0)],      # tunnel in the side of the small cave
+            [1.5, 1.5, Sensors.HOLE, Point3(-19.05, 17.6, -56.4), Vec3(0, 0, 0)],       # hole in bottom_ground
+            [1.5, 1.5, Sensors.HOLE, Point3(-19.05, 17.6, -12), Vec3(-1.0, 0, 0)],      # hole in top_ground
+            [3, 3, Sensors.HOLE, Point3(-38.1466, -21.9663, -53.5114), Vec3(0, 0, 0)],  # hole to enter basement
+            [4, 6, Sensors.TUNNEL, Point3(32.179, -3.35926, -15.7665), Vec3(-11, 0, 0)],  # big cave
+            [3, 4, Sensors.TUNNEL, Point3(-18.8616, 17.5443, -11.5), Vec3(-8, 0, 0)],     # small cave
+            [2, 6, Sensors.TUNNEL, Point3(5.4917, -17.8313, -14.3056), Vec3(64, 0, 0)],   # tunnel in the side of the bit cave
+            [2, 4, Sensors.TUNNEL, Point3(-19.2, 3.09684, -11.728), Vec3(31, 0, 0)],      # tunnel in the side of the small cave
         ]
 
-        for i, (width, depth, mask, tag, pos, hpr) in enumerate(sensors):
-            if i == 0:
-                self.sensor = Sensor(i, width, depth, mask=mask)
-                # self.sensor.node().set_tag('sensor_type', tag.name)
-                self.sensor.set_pos_hpr(pos, hpr)
-                self.attach_nature(self.sensor)
-                self.sensors[self.sensor.node().get_name()] = self.sensor
-                continue
+        for i, (width, depth, sensor, pos, hpr) in enumerate(sensors):
+            # if i == 0:
+            #     self.sensor = Sensor(i, sensorwidth, depth)
+            #     # self.sensor.node().set_tag('sensor_type', tag.name)
+            #     self.sensor.set_pos_hpr(pos, hpr)
+            #     self.attach_nature(self.sensor)
+            #     self.sensors[self.sensor.node().get_name()] = self.sensor
+            #     continue
 
-            sensor = Sensor(i, width, depth, mask=mask)
-            sensor.node().set_tag('sensor_type', tag.name)
+            sensor = Sensor(i, sensor, width, depth)
             sensor.set_pos_hpr(pos, hpr)
             self.attach_nature(sensor)
             self.sensors[sensor.node().get_name()] = sensor
@@ -478,15 +489,12 @@ class Scene(NodePath):
         if nd == self.mid_ground.node():
             return self.basement.node()
 
-    def check_terrain_hole(self, from_pos, distance):
+    def check_underground_sensors(self, from_pos, mask, distance=-5):
         to_pos = from_pos + Vec3(0, 0, distance)
-        mask = BitMask32.bit(5) | BitMask32.bit(6) | BitMask32.bit(7)
 
-        if (hit := base.world.ray_test_closest(from_pos, to_pos, mask)).has_hit():
-            # print(hit.get_node())
+        if (hit := base.world.ray_test_closest(
+                from_pos, to_pos, BitMask32.bit(mask))).has_hit():
             key = hit.get_node().get_name()
             sensor = self.sensors[key]
-            return sensor
-            # return hit.get_node()
 
-        # return None
+            return sensor
