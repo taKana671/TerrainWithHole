@@ -25,9 +25,9 @@ class Motions(Enum):
 class Status(Enum):
 
     FIND_HOLE = auto()
-    INTO_HOLE = auto()
     FALLING = auto()
     MOVE = auto()
+    IN_ROOM = auto()
 
 
 
@@ -52,7 +52,7 @@ class Walker(NodePath):
         self.node().set_ccd_motion_threshold(1e-7)
         self.node().set_ccd_swept_sphere_radius(0.5)
 
-        self.set_collide_mask(BitMask32.bit(1) | BitMask32.bit(5))
+        self.set_collide_mask(BitMask32.bit(6))
         self.set_scale(0.5)
         self.world.attach(self.node())
 
@@ -70,9 +70,6 @@ class Walker(NodePath):
         self.actor.reparent_to(self.direction_nd)
         # self.actor.set_scale(0.5)
 
-        # mid terrain の待機場所
-        # LPoint3f(-17.6692, 15.4803, -55.3163)
-
     def navigate(self):
         """Return a relative point to enable camera to follow a character
            when camera's view is blocked by an object like walls.
@@ -80,17 +77,14 @@ class Walker(NodePath):
         return self.get_relative_point(self.direction_nd, Vec3(0, 10, 2))
         # return self.get_relative_point(self.direction_nd, Vec3(0, 0, 5))
 
-    def check_downward(self, from_pos, distance=-5, mask=1):
+    def check_downward(self, from_pos, distance=-2.5):
         to_pos = from_pos + Vec3(0, 0, distance)
 
         if (hit := self.world.ray_test_closest(
-                from_pos, to_pos, BitMask32.bit(mask))).has_hit():
-            # print(hit.get_node())
+                from_pos, to_pos, BitMask32.bit(1) | BitMask32.bit(3) | BitMask32.bit(6))).has_hit():
+            print('downward check', hit.get_node().get_name())
             return hit
         return None
-
-    # def get_orientation(self):
-    #     return self.direction_nd.get_quat(base.render).get_forward()
 
     def predict_collision(self, current_pos, next_pos):
         ts_from = TransformState.make_pos(current_pos)
@@ -130,41 +124,29 @@ class Walker(NodePath):
 
         return motion, direction
 
-    def go_into_hole(self, dt):
-        self.set_z(self.get_z() - 10 * dt)
-
-        if self.detect_collision(self.responded_sensor.node()):
-            return True
-
     def land(self, dt):
-        current_pos = self.get_pos()
-        next_pos = Point3(current_pos.xy, current_pos.z - 20 * dt)
-        to_pos = next_pos + Vec3(0, 0, -1.5)
-
-        if (hit := self.world.ray_test_closest(
-                next_pos, to_pos, BitMask32.bit(3))).has_hit():
+        if self.responded_sensor.dest_sensor.detect_collision(self.node()):
+            self.status = Status.MOVE
             self.responded_sensor = None
-            self.set_z(hit.get_hit_pos().z + 1.5)
+            print('landed')
             return True
 
-        self.set_pos(next_pos)
+        self.set_z(self.get_z() - 20 * dt)
 
     def update(self, dt, key_inputs):
         motion = None
         match self.status:
 
-            case Status.INTO_HOLE:
-                if self.go_into_hole(dt):
-                    self.status = Status.FALLING
-
             case Status.FALLING:
-                if self.land(dt):
-                    self.status = Status.MOVE
+                self.land(dt)
 
             case Status.MOVE:
                 motion, direction = self.parse_args(key_inputs)
                 self.turn(direction, dt)
                 self.move(direction, dt)
+
+            case Status.IN_ROOM:
+                pass
 
         self.play_anim(motion)
 
@@ -174,33 +156,45 @@ class Walker(NodePath):
             self.direction_nd.set_h(self.direction_nd.get_h() + angle)
 
     def move(self, direction, dt):
-        current_pos = self.get_pos()
-
-        if sensor := base.scene.check_underground_sensors(
-                current_pos, Sensors.HOLE.mask):
-            self.responded_sensor = sensor
-            self.status = Status.INTO_HOLE
-            return
-
         if not direction.y:
             return
 
+        current_pos = self.get_pos()
         speed = 10 if direction.y < 0 else 5
         orientation = self.direction_nd.get_quat(base.render).get_forward()
         next_pos = current_pos + orientation * direction.y * speed * dt
+        hit_z = None
 
-        if hit := self.check_downward(next_pos):
-            next_pos.z = hit.get_hit_pos().z + 1.5
+        # Check a hole in the ground.
+        if sensor := base.scene.check_sensors(current_pos, Sensors.HOLE.mask):
+            # If a landing point is far, the character will fall into the hole.
+            if not (sensor_hit := sensor.dest_sensor.respond(next_pos)):
+                self.set_pos(next_pos)
+                self.responded_sensor = sensor
+                self.status = Status.FALLING
+                return
 
-            if self.predict_collision(current_pos, next_pos):
-                if not base.scene.check_underground_sensors(next_pos, Sensors.TUNNEL.mask):
-                    return
+            hit_z = sensor_hit.get_hit_pos().z
 
-            self.set_pos(next_pos)
+        if not hit_z:
+            # If the character will be out of the terrain, cannot move.
+            if not (downward_hit := self.check_downward(next_pos)):
+                return
 
+            hit_z = downward_hit.get_hit_pos().z
 
+        next_pos.z = hit_z + 1.5
 
-    # def move(self, direction, dt):
+        # Check whether the collision with terrain or other objects will occur or not.
+        if self.predict_collision(current_pos, next_pos):
+            print('predict_collision')
+            # If no entrance or exit on the terrain, the character cannot move.
+            if not base.scene.check_sensors(next_pos, Sensors.TUNNEL.mask):
+                return
+
+        self.set_pos(next_pos)
+
+    # def move_org(self, direction, dt):
     #     if not direction.y:
     #         return
 
@@ -243,39 +237,3 @@ class Walker(NodePath):
 
         if self.actor.get_current_anim() != anim:
             self.actor.loop(anim)
-
-    # def move2(self, direction, dt):
-    #     if self.responded_sensor:
-
-    #         self.set_z(self.get_z() - 20 * dt)
-
-    #         # if self.detect_collision(self.destination_nd):
-    #         # if self.detect_collision(self.responded_sensor):
-    #         #     # import pdb; pdb.set_trace()
-    #         #     self.responded_sensor = None
-    #         return
-
-    #     if not direction.y:
-    #         return
-
-    #     speed = 10 if direction.y < 0 else 5
-    #     current_pos = self.get_pos()
-    #     next_pos = current_pos + self.get_orientation() * direction.y * speed * dt
-
-    #     if hit := self.check_downward(next_pos):
-    #         if sensor := base.scene.check_terrain_hole(next_pos, -5):
-    #             self.responded_sensor = sensor
-    #             self.status = Status.SENSOR_RESPOND
-    #             # walkerがsensorの高さより下になったらpassageに入ったとする。
-    #             # censorクラスのインスタンスがリターンされるように、check_terrain_holeを修正した。
-    #             # 落ちたら、カメラは穴の上まで動かし、
-
-    #         next_pos.z = hit.get_hit_pos().z + 1.5
-
-    #         if result := self.predict_collision(current_pos, next_pos):
-    #             if not (result.get_node().get_name().startswith('terrain') and
-    #                     self.check_downward(next_pos, distance=-10, mask=4)):
-    #                 return
-
-    #         self.set_pos(next_pos)
-    #         self.actor.set_play_rate(rate, anim)
