@@ -6,12 +6,14 @@ from direct.showbase.ShowBaseGlobal import globalClock
 from direct.showbase.InputStateGlobal import inputState
 from panda3d.core import load_prc_file_data
 from panda3d.core import NodePath, Point3, Vec3, Vec2, BitMask32, Quat
+from panda3d.core import TransparencyAttrib
+from direct.interval.IntervalGlobal import Sequence, Func
+
 
 IS_RALPH = True
 
 if IS_RALPH:
-    from walker import Walker, Motions
-    # from walker_for_coding import Walker, Motions
+    from walker import Walker, Motions, Status
 else:
     from seeker import Seeker, Motions
 
@@ -41,35 +43,40 @@ class TestTerrain(ShowBase):
         self.debug = self.render.attach_new_node(BulletDebugNode('debug'))
         self.world.set_debug_node(self.debug.node())
 
-        # self.camera.set_pos(Point3(-128, -128, 100))
-        # self.camera.set_pos(Point3(0, 0, 100))
-        # self.camera.look_at(Point3(0, 0, 10))
-
-        self.dragging = False
-        self.before_mouse_pos = Vec2()
-        self.room_camera = None
-        self.in_room = False
-        self.into_room = False
-
-        
-        # self.generate_terrain()
-        # self.world.attach(self.terrain_root.node())
-
         self.scene = Scene()
-        self.scene.reparent_to(self.render)
+        self.scene.root.reparent_to(self.render)
 
         if IS_RALPH:
             self.walker = Walker(self.world)
             self.walker.reparent_to(self.render)
+            
+            self.walker.set_pos(Point3(-18.0243, 14.9644, -9.21977))
+            
             self.floater = NodePath('floater')
             self.floater.set_z(3.0)
             self.floater.reparent_to(self.walker)
 
-            self.camera.reparent_to(self.walker)
-            self.camera.set_pos(self.walker.navigate())
+            # ***************parent to walker****************
+            # self.camera.reparent_to(self.walker)
+            # self.camera.set_pos(self.walker.navigate())
+            # self.camera.look_at(self.floater)
+            # self.camLens.set_near_far(0.5, 10000)
+            # self.camLens.set_fov(90)
+            # ***************parent to walker****************
+
+            # ***************parent to render****************
+            self.camNode.set_active(False)
+
+            self.room_camera = None
+            self.change_camera = False
+
+            self.camera = self.create_camera()
+            self.camera.reparent_to(self.render)
+            self.cam_distance = Vec3(0, -5, 1)
+            self.camera.set_pos(self.walker.get_pos() + self.cam_distance)
+
             self.camera.look_at(self.floater)
-            self.camLens.set_near_far(0.2, 10000)
-            self.camLens.set_fov(90)
+            # ***************parent to render****************
         else:
             self.walker = Seeker(self.world)
             self.walker.reparent_to(self.render)
@@ -128,8 +135,6 @@ class TestTerrain(ShowBase):
         self.accept('i', self.print_info)
         self.accept('escape', sys.exit)
         self.accept('m', self.toggle_debug)
-        self.accept('mouse1', self.mouse_click)
-        self.accept('mouse1-up', self.mouse_release)
         self.taskMgr.add(self.update, 'update')
 
     def go_down(self, is_down):
@@ -138,8 +143,7 @@ class TestTerrain(ShowBase):
             direction *= -1
         z = self.walker.get_z() + direction
         self.walker.set_z(z)
-    
-    
+
     def positioning(self, target, increment):
         pos = Point3()
         hpr = Vec3()
@@ -164,6 +168,11 @@ class TestTerrain(ShowBase):
                 r = 0.1 if increment else -0.1
                 hpr.z = r
 
+        # pos = self.scene.basement.slope.get_pos() + pos
+        # hpr = self.scene.basement.slope.get_hpr() + hpr
+        # print(pos, hpr)
+        # self.scene.basement.slope.set_pos_hpr(pos, hpr)
+
         pos = self.scene.sensor.get_pos() + pos
         hpr = self.scene.sensor.get_hpr() + hpr
         print(pos, hpr)
@@ -179,161 +188,119 @@ class TestTerrain(ShowBase):
         else:
             self.debug.hide()
 
-    def mouse_click(self):
-        self.dragging = True
-        self.dragging_start_time = globalClock.get_frame_time()
-
-    def mouse_release(self):
-        self.dragging = False
-        self.before_mouse_pos.x = 0
-        self.before_mouse_pos.y = 0
-
-    def rotate_camera(self, mouse_pos, dt):
-        angle = Vec3()
-
-        if (delta := mouse_pos.x - self.before_mouse_pos.x) < 0:
-            angle.x -= 90
-        elif delta > 0:
-            angle.x += 90
-
-        if (delta := mouse_pos.y - self.before_mouse_pos.y) < -0.01:
-            angle.y += 90
-        elif delta > 0.01:
-            angle.y -= 90
-
-        angle *= dt
-        self.camera.set_hpr(self.camera.get_hpr() + angle)
-
-        self.before_mouse_pos.x = mouse_pos.x
-        self.before_mouse_pos.y = mouse_pos.y
-
     def ray_cast(self, from_pos, to_pos):
-        # if (result := self.world.ray_test_closest(
-        #         from_pos, to_pos, Mask.environment)).has_hit():
         if (result := self.world.ray_test_closest(
-                from_pos, to_pos, BitMask32.bit(1) | BitMask32.bit(3) | BitMask32.bit(2))).has_hit():
+                from_pos, to_pos, BitMask32.bit(2) | BitMask32.bit(3) | BitMask32.bit(7))).has_hit():
+            # print('ray cast for camera', result.get_node().get_name())
             return result.get_node()
 
         return None
 
-    def find_camera_pos(self, walker_pos, next_pos):
+    def create_camera(self):
+        camera = self.make_camera(self.win)
+        camera.node().get_lens().set_fov(90)
+        camera.node().get_lens().set_near_far(0.1, 10000)
+        return camera
+
+    def fade_camera(self, pos, look_at, duration=2.0):
+        self.cam_faded = False
+
+        props = self.win.get_properties()
+        size = props.get_size()
+        buffer = self.win.make_texture_buffer('tex_buffer', *size)
+        buffer.set_clear_color_active(True)
+        buffer.set_clear_color((0.5, 0.5, 0.5, 1))
+
+        temp_cam = self.make_camera(buffer)
+        temp_cam.node().get_lens().set_fov(90)
+        temp_cam.set_pos(pos)
+        temp_cam.look_at(look_at)
+
+        card = buffer.get_texture_card()
+        card.reparent_to(self.render2d)
+
+        # Screens slowly changes, having afterimage.
+        card.set_transparency(TransparencyAttrib.M_alpha)
+        # Screen quckly changes, having no afterimage.
+        # card.set_transparency(TransparencyAttrib.M_multisample)
+        self.camera.detach_node()
+        self.camera.reparent_to(self.render)
+
+        Sequence(
+            card.colorScaleInterval(duration, 1, 0, blendType='easeInOut'),
+            Func(self.camera.set_pos, pos),
+            Func(self.camera.look_at, look_at),
+            Func(card.remove_node),
+            Func(temp_cam.remove_node),
+            Func(self.graphics_engine.remove_window, buffer),
+            Func(self.end_fade)
+        ).start()
+
+    def end_fade(self):
+        self.cam_faded = True
+
+    def rotate_camera(self, walker_pos, camera_pos):
         q = Quat()
-        point = Point3(0, 0, 0)
-        start = self.camera.get_pos()
-        angle = r = None
+        next_pos = walker_pos + self.walker.direction_relative_pos(Vec3(0, 5, 1))
 
         for i in range(36):
-            camera_pos = next_pos + walker_pos
-            if self.ray_cast(camera_pos, walker_pos) == self.walker.node():
-                return next_pos
+            if node := self.ray_cast(next_pos, walker_pos):
+                if node == self.walker.node():
+                    return next_pos
 
-            times = i // 2 + 1
-            angle = 10 * times if i % 2 == 0 else -10 * times
+            n = i // 2 + 1
+            angle = 10 * n if i % 2 == 0 else -10 * n
             q.set_from_axis_angle(angle, Vec3.up())
-            r = q.xform(start - point)
-            next_pos = point + r
+            next_pos = q.xform(camera_pos - walker_pos) + walker_pos
 
-        # return Vec3(0, 0, 10)
-        return None
+    def watch_falling(self, walker_pos, camera_pos, dt):
+        next_pos = Point3()
+        xy_diff = camera_pos.xy - walker_pos.xy
+        next_pos.xy = camera_pos.xy + xy_diff * -1 * dt * 10
+        next_pos.z = camera_pos.z
+        self.camera.set_pos(next_pos)
+        self.camera.look_at(self.floater)
 
-    def control_camera(self):
+    def camera_outside(self, walker_pos, camera_pos):
         """Reposition the camera if the camera's view is blocked
-           by other objects like terrain, rocks, trees.
+           by other objects like terrain.
         """
-        if not self.is_falling:
-            if self.walker.destination_nd:
-                if (name := self.walker.destination_nd.get_name()).endswith('room'):
-                    self.room_camera = self.render.find(f'**/{name}_camera')
-                    self.into_room = True
-                else:
-                    if self.ray_cast(
-                            self.camera.get_pos(self.render), self.walker.get_pos()) != self.walker.node():
-                        self.camera.set_pos(Vec3(0, 0, 10))
-                        self.camera.look_at(self.floater)
-                        self.is_falling = True
+        if (node := self.ray_cast(camera_pos, walker_pos)) is not None \
+                and node != self.walker.node():
+            if next_pos := self.rotate_camera(walker_pos, camera_pos):
+                self.camera.set_pos(next_pos)
+                self.camera.look_at(self.floater)
+                self.cam_distance = next_pos - walker_pos
                 return
 
-        if self.is_falling:
-            # self.camera.set_pos(Vec3(0, 0, 5))
-            # self.camera.look_at(self.floater)
-            if not self.walker.destination_nd:
-                if self.room_camera:
-                    # self.into_room = True
-                    self.camera.detach_node()
-                    self.camera.reparent_to(self.room_camera)
-                    self.camera.set_pos(Point3(-9.5, 9.5, -2))
-                    self.camera.look_at(self.floater)
-                    self.in_room = True
-                    self.is_falling = False
-                else:
-                    self.camera.set_pos(self.walker.navigate())
+        self.camera.set_pos(walker_pos + self.cam_distance)
+        self.camera.look_at(self.floater)
 
-                self.is_falling = False
-           
-        if self.into_room:
-            walker_pos = self.walker.get_pos()
-            camera_pos = self.camera.get_pos() + walker_pos
+    def camera_in_room(self, walker_pos, camera_pos):
+        """Once the character get inside the room, do not move the camera.
+           If camera's view is blocked, position the camera at the center of the roof.
+        """
+        if (node := self.ray_cast(camera_pos, walker_pos)) is not None \
+                and node != self.walker.node():
+            self.camera.set_pos(self.scene.basement.room_camera.get_pos(self.render))
+            self.change_camera = True
 
-            if self.ray_cast(camera_pos, walker_pos) != self.walker.node():
-                self.camera.detach_node()
-                self.camera.reparent_to(self.room_camera)
-                self.camera.set_pos(Point3(-9.5, 9.5, -2))
-                self.camera.look_at(self.floater)
-                self.into_room = False
-                self.in_room = True
-            return
+        self.camera.look_at(self.floater)
 
-        if self.in_room:
-            # walker_pos = self.walker.get_pos()
-            # camera_pos = self.camera.get_pos(self.render)  # + walker_pos
-
-            # if self.ray_cast(camera_pos, walker_pos) != self.walker.node():
-            #     self.camera.detach_node()
-            #     self.camera.reparent_to(self.walker)
-            #     self.camera.set_pos(self.walker.navigate())
-            #     self.in_room = False
-
-            # # walker_pos = self.walker.get_pos()
-            # # if (result := self.world.ray_test_closest(
-            # #         walker_pos, walker_pos + Vec3(0, 0, -5), BitMask32.bit(1))).has_hit():
-            #     self.camera.detach_node()
-            #     self.camera.reparent_to(self.walker)
-            #     self.camera.set_pos(self.walker.navigate())
-            #     self.in_room = False
-
-            self.camera.look_at(self.floater)
-            return
-
+    def control_camera(self, dt):
         walker_pos = self.walker.get_pos()
-        camera_pos = self.camera.get_pos() + walker_pos
+        camera_pos = self.camera.get_pos()
 
-        if self.ray_cast(camera_pos, walker_pos) != self.walker.node():
-            # if self.walker.destination_nd:
-            #     camera_pos = self.camera.get_pos(base.render)
-            #     if self.ray_cast(camera_pos, camera_pos + Vec3(0, 0, -1)):
-            #         self.is_falling = True
-            #     # self.is_falling = True
-            #     return
+        match self.walker.status:
 
-            if next_pos := self.find_camera_pos(walker_pos, self.walker.navigate()):
-                self.camera.set_pos(next_pos)
-                # self.camera.set_z(50)
-                self.camera.look_at(self.floater)
+            case Status.FALLING:
+                self.watch_falling(walker_pos, camera_pos, dt)
 
+            case Status.INTO_ROOM | Status.IN_ROOM:
+                self.camera_in_room(walker_pos, camera_pos)
 
-   
-    # def control_camera(self):
-    #     """Reposition the camera if the camera's view is blocked
-    #        by other objects like terrain, rocks, trees.
-    #     """
-    #     walker_pos = self.walker.get_pos()
-    #     camera_pos = self.camera.get_pos() + walker_pos
-
-    #     if self.ray_cast(camera_pos, walker_pos) != self.walker.node():
-    #         if next_pos := self.find_camera_pos(walker_pos, self.walker.navigate()):
-    #             self.camera.set_pos(next_pos)
-    #             # self.camera.set_z(50)
-    #             self.camera.look_at(self.floater)
+            case _:
+                self.camera_outside(walker_pos, camera_pos)
 
     def control_walker(self, dt):
         motions = []
@@ -346,7 +313,6 @@ class TestTerrain(ShowBase):
             motions.append(Motions.LEFT)
         if inputState.is_set('right'):
             motions.append(Motions.RIGHT)
-
         if inputState.is_set('up'):
             motions.append(Motions.UP)
         if inputState.is_set('down'):
@@ -367,24 +333,10 @@ class TestTerrain(ShowBase):
     def update(self, task):
         dt = globalClock.get_dt()
 
-        if not self.state:
-            pos = self.find_walker_start_pos()
-            # self.walker.set_pos(pos)
-            self.walker.set_pos(Point3(-18.0243, 14.9644, -9.21977))
-            # self.walker.set_pos(Point3(-42.6517, -16.6843, -50.0506))
-
-            self.state = True
-
         self.control_walker(dt)
-        self.control_camera()
-
-        if self.mouseWatcherNode.has_mouse():
-            mouse_pos = self.mouseWatcherNode.get_mouse()
-            if self.dragging:
-                if globalClock.get_frame_time() - self.dragging_start_time >= 0.2:
-                    self.rotate_camera(mouse_pos, dt)
-
+        self.control_camera(dt)
         self.scene.mid_water.wave(task.time)
+
         self.world.do_physics(dt)
         return task.cont
 
@@ -392,4 +344,3 @@ class TestTerrain(ShowBase):
 if __name__ == '__main__':
     app = TestTerrain()
     app.run()
- 

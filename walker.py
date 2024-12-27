@@ -8,8 +8,6 @@ from panda3d.bullet import BulletRigidBodyNode
 from panda3d.core import PandaNode, NodePath, TransformState
 from panda3d.core import Vec2, Vec3, Point3
 
-# from constants import Config, Mask
-# from constants import SensorLocations
 from scene import Sensors
 
 
@@ -28,8 +26,7 @@ class Status(Enum):
     FALLING = auto()
     MOVE = auto()
     IN_ROOM = auto()
-
-
+    INTO_ROOM = auto()
 
 
 class Walker(NodePath):
@@ -52,7 +49,7 @@ class Walker(NodePath):
         self.node().set_ccd_motion_threshold(1e-7)
         self.node().set_ccd_swept_sphere_radius(0.5)
 
-        self.set_collide_mask(BitMask32.bit(6))
+        self.set_collide_mask(BitMask32.bit(6) | BitMask32.bit(7))
         self.set_scale(0.5)
         self.world.attach(self.node())
 
@@ -68,7 +65,6 @@ class Walker(NodePath):
         self.actor.set_transform(TransformState.make_pos(Vec3(0, 0, -2.5)))
         self.actor.set_name('ralph')
         self.actor.reparent_to(self.direction_nd)
-        # self.actor.set_scale(0.5)
 
     def navigate(self):
         """Return a relative point to enable camera to follow a character
@@ -77,12 +73,15 @@ class Walker(NodePath):
         return self.get_relative_point(self.direction_nd, Vec3(0, 10, 2))
         # return self.get_relative_point(self.direction_nd, Vec3(0, 0, 5))
 
+    def direction_relative_pos(self, pt):
+        return self.get_relative_point(self.direction_nd, pt)
+
     def check_downward(self, from_pos, distance=-2.5):
         to_pos = from_pos + Vec3(0, 0, distance)
 
         if (hit := self.world.ray_test_closest(
                 from_pos, to_pos, BitMask32.bit(1) | BitMask32.bit(3) | BitMask32.bit(6))).has_hit():
-            print('downward check', hit.get_node().get_name())
+            # print('downward check', hit.get_node().get_name())
             return hit
         return None
 
@@ -92,15 +91,8 @@ class Walker(NodePath):
 
         if (result := self.world.sweep_test_closest(
                 self.test_shape, ts_from, ts_to, BitMask32.bit(2) | BitMask32.bit(3), 0.0)).has_hit():
-            print(result.get_node().get_name())
+            # print(result.get_node().get_name())
             return result
-
-    def detect_collision(self, target_nd):
-        if (result := self.world.contact_test_pair(
-                self.node(), target_nd)).get_num_contacts():
-            for con in result.get_contacts():
-                # print(con.get_node1())
-                return True
 
     def parse_args(self, key_inputs):
         direction = Vec2()
@@ -126,7 +118,6 @@ class Walker(NodePath):
 
     def land(self, dt):
         if self.responded_sensor.dest_sensor.detect_collision(self.node()):
-            self.status = Status.MOVE
             self.responded_sensor = None
             print('landed')
             return True
@@ -134,19 +125,28 @@ class Walker(NodePath):
         self.set_z(self.get_z() - 20 * dt)
 
     def update(self, dt, key_inputs):
-        motion = None
+        motion, direction = self.parse_args(key_inputs)
+
         match self.status:
 
             case Status.FALLING:
-                self.land(dt)
+                motion = None
+                if self.land(dt):
+                    self.status = Status.MOVE
+
+            case Status.INTO_ROOM:
+                motion = None
+                if self.land(dt):
+                    print('end into_room')
+                    self.status = Status.IN_ROOM
 
             case Status.MOVE:
-                motion, direction = self.parse_args(key_inputs)
                 self.turn(direction, dt)
                 self.move(direction, dt)
 
             case Status.IN_ROOM:
-                pass
+                self.turn(direction, dt)
+                self.move_inside(direction, dt)
 
         self.play_anim(motion)
 
@@ -171,7 +171,14 @@ class Walker(NodePath):
             if not (sensor_hit := sensor.dest_sensor.respond(next_pos)):
                 self.set_pos(next_pos)
                 self.responded_sensor = sensor
-                self.status = Status.FALLING
+
+                match self.responded_sensor.dest_sensor.location:
+                    case Sensors.MID_GROUND.location:
+                        self.status = Status.FALLING
+
+                    case Sensors.STEPS.location:
+                        self.status = Status.INTO_ROOM
+
                 return
 
             hit_z = sensor_hit.get_hit_pos().z
@@ -180,55 +187,55 @@ class Walker(NodePath):
             # If the character will be out of the terrain, cannot move.
             if not (downward_hit := self.check_downward(next_pos)):
                 return
-
             hit_z = downward_hit.get_hit_pos().z
 
         next_pos.z = hit_z + 1.5
 
         # Check whether the collision with terrain or other objects will occur or not.
         if self.predict_collision(current_pos, next_pos):
-            print('predict_collision')
             # If no entrance or exit on the terrain, the character cannot move.
             if not base.scene.check_sensors(next_pos, Sensors.TUNNEL.mask):
                 return
 
         self.set_pos(next_pos)
 
-    # def move_org(self, direction, dt):
-    #     if not direction.y:
-    #         return
+    def move_inside(self, direction, dt):
+        if not direction.y:
+            return
 
-    #     speed = 10 if direction.y < 0 else 5
-    #     current_pos = self.get_pos()
-    #     next_pos = current_pos + self.get_orientation() * direction.y * speed * dt
+        current_pos = self.get_pos()
+        speed = 10 if direction.y < 0 else 5
+        orientation = self.direction_nd.get_quat(base.render).get_forward()
+        next_pos = current_pos + orientation * direction.y * speed * dt
 
-    #     if hit := self.check_downward(next_pos):
-    #         # if self.check_downward(next_pos, mask=5):
-    #         if sensor := base.scene.check_terrain_hole(next_pos, -5):
-    #             self.responded_sensor = sensor
-    #             self.status = Status.INTO_HOLE
+        if downward_hit := self.check_downward(next_pos):
+            # Check whether the character will go outside or not.
+            if base.scene.check_sensors(current_pos, Sensors.HOLE.mask):
+                # print('go outside the basement')
+                self.status = Status.MOVE
 
+            hit_z = downward_hit.get_hit_pos().z
+            next_pos.z = hit_z + 1.5
 
-    #         next_pos.z = hit.get_hit_pos().z + 1.5
+            # Check that the collision with walls or other objects in the room will occur.
+            if self.predict_collision(current_pos, next_pos):
+                # print('predict_collision')
+                return
 
-    #         if result := self.predict_collision(current_pos, next_pos):
-    #             if not (result.get_node().get_name().startswith('terrain') and
-    #                     self.check_downward(next_pos, distance=-10, mask=4)):
-    #                 return
-
-    #         self.set_pos(next_pos)
+            self.set_pos(next_pos)
 
     def play_anim(self, motion):
         match motion:
+
             case Motions.FORWARD:
                 anim = Walker.RUN
-                rate = 1
+
             case Motions.BACKWARD:
                 anim = Walker.WALK
-                rate = -1
+
             case Motions.TURN:
                 anim = Walker.WALK
-                rate = 1
+
             case _:
                 if self.actor.get_current_anim() is not None:
                     self.actor.stop()
