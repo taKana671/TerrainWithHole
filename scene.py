@@ -317,11 +317,12 @@ class Cave(AssembledModel):
 
 class Terrain(NodePath):
 
-    def __init__(self, name, heightmap, height, tex_files, block_size=8, mask=1):
+    def __init__(self, name, heightmap, height, tex_files, block_size=8, mask=1, discard=True):
         super().__init__(BulletRigidBodyNode(f'terrain_{name}'))
-        self.heightmap = heightmap
+        self.heightmap = f'terrains/{heightmap}'
         self.height = height
         self.block_size = block_size
+        self.discard = discard
 
         self.node().set_mass(0)
         self.set_collide_mask(BitMask32.bit(mask))
@@ -350,7 +351,8 @@ class Terrain(NodePath):
         self.terrain.generate()
         self.root.reparent_to(self)
 
-        shader = Shader.load(Shader.SL_GLSL, 'shaders/terrain_v.glsl', 'shaders/terrain_f.glsl')
+        f_name = 'terrain_f' if self.discard else 'terrain_no_discard_f'
+        shader = Shader.load(Shader.SL_GLSL, 'shaders/terrain_v.glsl', f'shaders/{f_name}.glsl')
         self.root.set_shader(shader)
         self.root.set_shader_input('heightmap', base.loader.load_texture(self.heightmap))
 
@@ -392,8 +394,6 @@ class Scene:
         self.setup_environments()
         self.create_sensor()
 
-        self.ground_mask = BitMask32.bit(1) | BitMask32.bit(3) | BitMask32.bit(6)
-
     def attach_nature(self, model, parent=None):
         parent = self.root if parent is None else parent
         model.reparent_to(parent)
@@ -424,7 +424,7 @@ class Scene:
             ('stones_01.jpg', 20),
         ]
 
-        self.mid_ground = Terrain('mid_gd', 'mid_ground.png', 20, tex_files, block_size=4)
+        self.mid_ground = Terrain('mid_gd', 'mid_ground.png', 20, tex_files, block_size=4, discard=False)
         self.mid_ground.make_hole(6, 10)
         # block_np = self.terrain.getBlockNodePath(2, 5)  # blocksize=8
         self.attach_nature(self.mid_ground)
@@ -498,14 +498,6 @@ class Scene:
         ]
 
         for i, (name, width, depth, sensor, pos, hpr) in enumerate(sensors):
-            # if i == 0:
-            #     self.sensor = Sensor(name, sensor, width, depth)
-            #     self.sensor.set_pos_hpr(pos, hpr)
-            #     self.attach_nature(self.sensor)
-            #     attach_sensor = self.sensors[name[:-1]]
-            #     attach_sensor.dest_sensor = self.sensor
-            #     continue
-
             underground_sensor = Sensor(name, sensor, width, depth)
             underground_sensor.set_pos_hpr(pos, hpr)
             self.attach_nature(underground_sensor)
@@ -519,5 +511,4 @@ class Scene:
                 from_pos, to_pos, BitMask32.bit(mask))).has_hit():
             key = hit.get_node().get_name()
             sensor = self.sensors[key]
-            print('scene checked sensor', key, sensor.node().get_name())
             return sensor

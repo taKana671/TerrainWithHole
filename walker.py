@@ -1,12 +1,11 @@
 from enum import Enum, auto
 
-from panda3d.core import BitMask32
 from direct.actor.Actor import Actor
 from panda3d.bullet import BulletCapsuleShape, ZUp
-from panda3d.bullet import BulletSphereShape, BulletBoxShape
+from panda3d.bullet import BulletSphereShape
 from panda3d.bullet import BulletRigidBodyNode
 from panda3d.core import PandaNode, NodePath, TransformState
-from panda3d.core import Vec2, Vec3
+from panda3d.core import Vec2, Vec3, BitMask32
 
 from scene import Sensors
 
@@ -70,20 +69,19 @@ class Walker(NodePath):
 
     def check_downward(self, from_pos, distance=-2.5):
         to_pos = from_pos + Vec3(0, 0, distance)
+        mask = BitMask32.bit(1) | BitMask32.bit(3) | BitMask32.bit(6)
 
-        if (hit := base.world.ray_test_closest(
-                from_pos, to_pos, BitMask32.bit(1) | BitMask32.bit(3) | BitMask32.bit(6))).has_hit():
-            # print('downward check', hit.get_node().get_name())
+        if (hit := base.world.ray_test_closest(from_pos, to_pos, mask)).has_hit():
             return hit
         return None
 
     def predict_collision(self, current_pos, next_pos):
         ts_from = TransformState.make_pos(current_pos)
         ts_to = TransformState.make_pos(next_pos)
+        mask = BitMask32.bit(2) | BitMask32.bit(3)
 
         if (result := base.world.sweep_test_closest(
-                self.test_shape, ts_from, ts_to, BitMask32.bit(2) | BitMask32.bit(3), 0.0)).has_hit():
-            print('predicted collision', result.get_node().get_name())
+                self.test_shape, ts_from, ts_to, mask, 0.0)).has_hit():
             return result
 
     def parse_args(self, key_inputs):
@@ -111,7 +109,6 @@ class Walker(NodePath):
     def land(self, dt):
         if self.responded_sensor.dest_sensor.detect_collision(self.node()):
             self.responded_sensor = None
-            print('landed')
             return True
 
         self.set_z(self.get_z() - 20 * dt)
@@ -150,7 +147,6 @@ class Walker(NodePath):
             hit_z = sensor_hit.get_hit_pos().z
 
         if not hit_z:
-            # If the character will be out of the terrain, cannot move.
             if not (downward_hit := self.check_downward(next_pos)):
                 return
             hit_z = downward_hit.get_hit_pos().z
@@ -177,7 +173,6 @@ class Walker(NodePath):
         if downward_hit := self.check_downward(next_pos):
             # Check whether the character will go outside or not.
             if base.scene.check_sensors(current_pos, Sensors.HOLE.mask):
-                # print('go outside the basement')
                 self.status = Status.MOVE
 
             hit_z = downward_hit.get_hit_pos().z
@@ -223,7 +218,6 @@ class Walker(NodePath):
             case Status.INTO_ROOM:
                 motion = None
                 if self.land(dt):
-                    print('end into_room')
                     self.status = Status.IN_ROOM
 
             case Status.MOVE:
