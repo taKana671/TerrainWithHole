@@ -1,14 +1,13 @@
 from enum import Enum, auto
 
-from panda3d.core import BitMask32
 from direct.actor.Actor import Actor
 from panda3d.bullet import BulletCapsuleShape, ZUp
 from panda3d.bullet import BulletSphereShape
 from panda3d.bullet import BulletRigidBodyNode
 from panda3d.core import PandaNode, NodePath, TransformState
-from panda3d.core import Vec3
+from panda3d.core import Vec2, Vec3, BitMask32
 
-from constants import Config, Mask
+from scene import Sensors
 
 
 class Motions(Enum):
@@ -20,16 +19,26 @@ class Motions(Enum):
     TURN = auto()
 
 
+class Status(Enum):
+
+    FIND_HOLE = auto()
+    FALLING = auto()
+    MOVE = auto()
+    IN_ROOM = auto()
+    INTO_ROOM = auto()
+
+
 class Walker(NodePath):
 
     RUN = 'run'
     WALK = 'walk'
 
-    def __init__(self, world):
+    def __init__(self):
         super().__init__(BulletRigidBodyNode('wolker'))
-        self.world = world
         self.test_shape = BulletSphereShape(0.5)
-        self.moving_direction = 0
+
+        self.responded_sensor = None
+        self.status = Status.MOVE
 
         h, w = 6, 1.2
         shape = BulletCapsuleShape(w, h - 2 * w, ZUp)
@@ -38,9 +47,9 @@ class Walker(NodePath):
         self.node().set_ccd_motion_threshold(1e-7)
         self.node().set_ccd_swept_sphere_radius(0.5)
 
-        self.set_collide_mask(Mask.terrain | Mask.sensor)
+        self.set_collide_mask(BitMask32.bit(6) | BitMask32.bit(7))
         self.set_scale(0.5)
-        self.world.attach(self.node())
+        base.world.attach(self.node())
 
         self.direction_nd = NodePath(PandaNode('direction'))
         self.direction_nd.set_h(180)
@@ -55,115 +64,138 @@ class Walker(NodePath):
         self.actor.set_name('ralph')
         self.actor.reparent_to(self.direction_nd)
 
-    def navigate(self):
-        """Return a relative point to enable camera to follow a character
-           when camera's view is blocked by an object like walls.
-        """
-        return self.get_relative_point(self.direction_nd, Vec3(0, 10, 2))
+    def direction_relative_pos(self, pt):
+        return self.get_relative_point(self.direction_nd, pt)
 
-    def get_terrain_contact_pos(self, pos=None, mask=1):
-        if not pos:
-            pos = self.get_pos()
+    def check_downward(self, from_pos, distance=-2.5):
+        to_pos = from_pos + Vec3(0, 0, distance)
+        mask = BitMask32.bit(1) | BitMask32.bit(3) | BitMask32.bit(6)
 
-        below = pos - Vec3(0, 0, 30)
-        # if (hit := self.world.ray_test_closest(
-        #         pos, below, Mask.environment)).has_hit():
-        if (hit := self.world.ray_test_closest(
-                pos, below, BitMask32.bit(mask))).has_hit():
-            return hit.get_hit_pos()
-
+        if (hit := base.world.ray_test_closest(from_pos, to_pos, mask)).has_hit():
+            return hit
         return None
 
-    def get_orientation(self):
-        return self.direction_nd.get_quat(base.render).get_forward()
-
-    def predict_collision(self, next_pos):
-        ts_from = TransformState.make_pos(self.get_pos())
+    def predict_collision(self, current_pos, next_pos):
+        ts_from = TransformState.make_pos(current_pos)
         ts_to = TransformState.make_pos(next_pos)
-        # result = self.world.sweep_test_closest(self.test_shape, ts_from, ts_to, Mask.nature, 0.0)
-        # result = self.world.sweep_test_closest(
-        #     self.test_shape, ts_from, ts_to, BitMask32.bit(2) | BitMask32.bit(3), 0.0)
-        result = self.world.sweep_test_closest(
-            self.test_shape, ts_from, ts_to, BitMask32.bit(3), 0.0)
+        mask = BitMask32.bit(2) | BitMask32.bit(3)
 
-        if result.has_hit():
+        if (result := base.world.sweep_test_closest(
+                self.test_shape, ts_from, ts_to, mask, 0.0)).has_hit():
             return result
 
-        # return result.has_hit()
-
-    def detect_collision(self, np):
-        if (result := self.world.contact_test_pair(self.node(), np.node())).get_num_contacts():
-            for con in result.get_contacts():
-                print(con.get_node1())
-            return True
-
-    def update(self, dt, motions):
-        direction = 0
-        angle = 0
+    def parse_args(self, key_inputs):
+        direction = Vec2()
         motion = None
 
-        if Motions.LEFT in motions:
-            angle += Config.angle * dt
+        if Motions.LEFT in key_inputs:
+            direction.x += 1
             motion = Motions.TURN
-        if Motions.RIGHT in motions:
-            angle -= Config.angle * dt
+
+        if Motions.RIGHT in key_inputs:
+            direction.x -= 1
             motion = Motions.TURN
-        if Motions.FORWARD in motions:
-            direction += Config.forward
+
+        if Motions.FORWARD in key_inputs:
+            direction.y += -1
             motion = Motions.FORWARD
-        if Motions.BACKWARD in motions:
-            direction += Config.backward
+
+        if Motions.BACKWARD in key_inputs:
+            direction.y += 1
             motion = Motions.BACKWARD
 
-        self.turn(angle)
-        self.move(direction, dt)
-        self.play_anim(motion)
-        self.moving_direction = direction
+        return motion, direction
 
-    def turn(self, angle):
-        if angle:
+    def land(self, dt):
+        if self.responded_sensor.dest_sensor.detect_collision(self.node()):
+            self.responded_sensor = None
+            return True
+
+        self.set_z(self.get_z() - 20 * dt)
+
+    def turn(self, direction, dt):
+        if direction.x:
+            angle = 100 * direction.x * dt
             self.direction_nd.set_h(self.direction_nd.get_h() + angle)
 
     def move(self, direction, dt):
-        # Not move, if direction is 0.
-        if not direction:
+        if not direction.y:
             return
 
-        speed = 10 if direction < 0 else 5
-        to_pos = self.get_pos() + self.get_orientation() * direction * speed * dt
+        current_pos = self.get_pos()
+        speed = 10 if direction.y < 0 else 5
+        orientation = self.direction_nd.get_quat(base.render).get_forward()
+        next_pos = current_pos + orientation * direction.y * speed * dt
+        hit_z = None
 
-        if contact_pos := self.get_terrain_contact_pos(to_pos):
-            next_pos = contact_pos + Vec3(0, 0, 1.5)
-
-            if result := self.predict_collision(next_pos):
-                if result.get_node() == base.scene.terrain2.node(): 
-                    if self.get_terrain_contact_pos(to_pos, mask=3):
-                        self.set_pos(next_pos)
-            else:
+        # Check a hole in the ground.
+        if sensor := base.scene.check_sensors(current_pos, Sensors.HOLE.mask):
+            # If a landing point is far, the character will fall into the hole.
+            if not (sensor_hit := sensor.dest_sensor.respond(next_pos)):
                 self.set_pos(next_pos)
+                self.responded_sensor = sensor
 
-        # if contact_pos := self.get_terrain_contact_pos(to_pos):
-        #     next_pos = contact_pos + Vec3(0, 0, 1.5)
-        #     self.set_pos(next_pos)
+                match self.responded_sensor.dest_sensor.location:
+                    case Sensors.MID_GROUND.location:
+                        self.status = Status.FALLING
 
+                    case Sensors.STEPS.location:
+                        self.status = Status.INTO_ROOM
 
-            # if not self.predict_collision(next_pos):
-            #     self.set_pos(next_pos)
-        #     else:
-        #         if self.get_terrain_contact_pos(to_pos, mask=3):
-        #             self.set_pos(next_pos)
+                return
+
+            hit_z = sensor_hit.get_hit_pos().z
+
+        if not hit_z:
+            if not (downward_hit := self.check_downward(next_pos)):
+                return
+            hit_z = downward_hit.get_hit_pos().z
+
+        next_pos.z = hit_z + 1.5
+
+        # Check whether the collision with terrain or other objects will occur or not.
+        if self.predict_collision(current_pos, next_pos):
+            # If no entrance or exit on the terrain, the character cannot move.
+            if not base.scene.check_sensors(next_pos, Sensors.TUNNEL.mask):
+                return
+
+        self.set_pos(next_pos)
+
+    def move_inside(self, direction, dt):
+        if not direction.y:
+            return
+
+        current_pos = self.get_pos()
+        speed = 10 if direction.y < 0 else 5
+        orientation = self.direction_nd.get_quat(base.render).get_forward()
+        next_pos = current_pos + orientation * direction.y * speed * dt
+
+        if downward_hit := self.check_downward(next_pos):
+            # Check whether the character will go outside or not.
+            if base.scene.check_sensors(current_pos, Sensors.HOLE.mask):
+                self.status = Status.MOVE
+
+            hit_z = downward_hit.get_hit_pos().z
+            next_pos.z = hit_z + 1.5
+
+            # Check that the collision with walls or other objects in the room will occur.
+            if self.predict_collision(current_pos, next_pos):
+                return
+
+            self.set_pos(next_pos)
 
     def play_anim(self, motion):
         match motion:
+
             case Motions.FORWARD:
                 anim = Walker.RUN
-                rate = 1
+
             case Motions.BACKWARD:
                 anim = Walker.WALK
-                rate = -1
+
             case Motions.TURN:
                 anim = Walker.WALK
-                rate = 1
+
             case _:
                 if self.actor.get_current_anim() is not None:
                     self.actor.stop()
@@ -172,4 +204,28 @@ class Walker(NodePath):
 
         if self.actor.get_current_anim() != anim:
             self.actor.loop(anim)
-            self.actor.set_play_rate(rate, anim)
+
+    def update(self, dt, key_inputs):
+        motion, direction = self.parse_args(key_inputs)
+
+        match self.status:
+
+            case Status.FALLING:
+                motion = None
+                if self.land(dt):
+                    self.status = Status.MOVE
+
+            case Status.INTO_ROOM:
+                motion = None
+                if self.land(dt):
+                    self.status = Status.IN_ROOM
+
+            case Status.MOVE:
+                self.turn(direction, dt)
+                self.move(direction, dt)
+
+            case Status.IN_ROOM:
+                self.turn(direction, dt)
+                self.move_inside(direction, dt)
+
+        self.play_anim(motion)
