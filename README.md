@@ -1,5 +1,5 @@
 # TerrainWithHole
-This repository is made to learn how to make hole in terrain.
+This repository was made to learn how to make hole in terrain.
 I tried two methods. The first is to partly remove geometry data from terrain by using memoryview. 
 The second is to draw a shape on a hightmap by OpenCV, make the shape transparent, and use 'discard' in a shader, which was inspired by the panda3D community site "https://discourse.panda3d.org/". 
 The first way does not need to use 'discard' in shaders.
