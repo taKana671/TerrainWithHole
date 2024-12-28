@@ -47,11 +47,11 @@ class TestTerrain(ShowBase):
         self.scene.root.reparent_to(self.render)
 
         if IS_RALPH:
-            self.walker = Walker(self.world)
+            self.walker = Walker()
             self.walker.reparent_to(self.render)
-            
+
             self.walker.set_pos(Point3(-18.0243, 14.9644, -9.21977))
-            
+
             self.floater = NodePath('floater')
             self.floater.set_z(3.0)
             self.floater.reparent_to(self.walker)
@@ -86,7 +86,7 @@ class TestTerrain(ShowBase):
             self.floater.reparent_to(self.walker)
 
             self.camera.reparent_to(self.walker)
-            self.camera.set_pos(self.walker.navigate())
+            self.camera.set_pos(self.walker.direction_relative_pos(Vec3(0, 10, 2)))
             self.camera.look_at(self.floater)
             self.camLens.set_near_far(0.2, 10000)
             self.camLens.set_fov(60)

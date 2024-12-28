@@ -5,21 +5,20 @@ from enum import Enum
 from panda3d.bullet import BulletRigidBodyNode
 from panda3d.bullet import BulletTriangleMeshShape, BulletHeightfieldShape, ZUp
 from panda3d.bullet import BulletConvexHullShape, BulletTriangleMesh
-from panda3d.core import NodePath, PandaNode, BitMask32, Point3, Vec3
+from panda3d.core import NodePath, BitMask32, Point3, Vec3, PandaNode
 from panda3d.core import Filename, PNMImage
 from panda3d.core import Shader, TextureStage
 from panda3d.core import GeoMipTerrain, TransformState
 from panda3d.core import TransparencyAttrib
 
-# from constants import SensorLocations
 from shapes.src import Sphere, Cylinder, Plane, Box
 
 
 class Sensors(Enum):
 
-    HOLE = ('hole', 5)          # mountain surcase
+    HOLE = ('hole', 5)
     BASEMENT = ('basement', 5)
-    TUNNEL = ('tunnel', 4)      # the entrance of basement
+    TUNNEL = ('tunnel', 4)
     MID_GROUND = ('mid_ground', 6)
     STEPS = ('steps', 6)
 
@@ -60,14 +59,7 @@ class Sensor(ModelRoot):
     def create_model(self, width, depth):
         model = Plane(width, depth, segs_w=int(width), segs_d=int(depth)).create()
         model.set_transparency(TransparencyAttrib.MAlpha)
-
-        ############################################
-        if self.node().get_name() == 'basement':
-            model.set_color(1, 1, 1, 0)
-        else:
-            model.set_color(1, 1, 1, 0)
-        ############################################
-
+        model.set_color(1, 1, 1, 0)
         self.add_trianglemesh_shape(model)
         model.reparent_to(self)
 
@@ -81,7 +73,6 @@ class Sensor(ModelRoot):
 
         if (hit := base.world.ray_test_closest(
                 from_pos, to_pos, BitMask32.bit(self.sensor.mask))).has_hit():
-            print('sensor respond', hit.get_node().get_name())
             return hit
 
 
@@ -142,21 +133,29 @@ class SquareTunnel(AssembledModel):
         self.assemble_model()
 
     def assemble_model(self):
+        tunnel = NodePath('tunnel')
+        tunnel.reparent_to(self)
+        gate = NodePath('gate')
+        gate.reparent_to(self)
+
         # tunnel
         model = Box(width=4.5, depth=31, height=5, segs_w=5, segs_d=30, segs_z=5,
                     open_bottom=True, open_front=True, open_back=True).create()
-        self.setup_model(model, 'tunnel', Point3(0.2, -0.8, -0.1), Vec3(51, 5, 0))
+        model.set_tex_scale(TextureStage.get_default(), 5, 1)
+        self.setup_model(model, 'tunnel', Point3(0.2, -0.8, -0.1), Vec3(51, 5, 0), parent=tunnel)
 
         # hollow rectangular prism that overlaps the hole in the mountain.
         maker = Box(width=6, depth=4, height=6, segs_w=6, segs_d=4, segs_z=6,
                     thickness=2, open_bottom=True, open_front=True, open_back=True)
 
-        self.setup_model(maker.create(), 'gate_1', Point3(13.0778, -10.635, -0.5477), Vec3(64, 0, 0))   #-10.635
-        self.setup_model(maker.create(), 'gate_2', Point3(-10.9222, 9.36504, 1.45235), Vec3(31, 0, 0))
+        self.setup_model(maker.create(), 'gate_1', Point3(13.0778, -10.635, -0.5477), Vec3(64, 0, 0), parent=gate)
+        self.setup_model(maker.create(), 'gate_2', Point3(-10.9222, 9.36504, 1.45235), Vec3(31, 0, 0), parent=gate)
 
         # set texture.
-        tex = base.loader.load_texture('textures/tile2.jpg')
-        self.set_texture(tex)
+        tex = base.loader.load_texture('textures/tile_07.jpg')
+        gate.set_texture(tex)
+        tex = base.loader.load_texture('textures/tile_06.jpg')
+        tunnel.set_texture(tex)
 
 
 class RoundTunnel(AssembledModel):
@@ -167,7 +166,7 @@ class RoundTunnel(AssembledModel):
 
     def assemble_model(self):
         # hollow rectangular prism that overlaps the hole in the top ground.
-        model = Box(width=3, depth=3, height=2, segs_w=4, segs_d=4, segs_z=2,
+        model = Box(width=3, depth=3.2, height=2, segs_w=4, segs_d=4, segs_z=2,
                     thickness=0.5, open_bottom=True, open_top=True).create()
         self.setup_model(model, 'hole_1', Point3(0, 0, 0.1), Vec3(180, 12.6, -7.5))
 
@@ -204,15 +203,13 @@ class Basement(AssembledModel):
         steps.reparent_to(self)
 
         # hollow rectangular prism that overlaps the hole.
-        model = Box(width=4.5, depth=4.5, height=2, segs_w=3, segs_d=3, thickness=0.5,
+        model = Box(width=5, depth=5, height=2, segs_w=3, segs_d=3, thickness=1.0,
                     open_bottom=True, open_top=True).create()
         self.setup_model(model, 'hole', Point3(0, 0, 0), Vec3(180, 0, 0), basement)
 
         # room
         model = Box(width=13.5, depth=13.5, height=8, segs_w=5, segs_d=5, segs_z=8, thickness=0.5,
                     open_top=True).create()
-        # model = Box(width=13.5, depth=13.5, height=8, segs_w=5, segs_d=5, segs_z=8, thickness=0.5,
-        #             open_top=True, open_front=True, open_back=True, open_left=True, open_right=True).create()
         self.setup_model(model, 'room', Point3(-4.5, -4.5, -5), Vec3(180, 0, 0), basement)
 
         # roofs
@@ -314,25 +311,21 @@ class Cave(AssembledModel):
 
         tex = base.loader.load_texture('textures/concrete_01.jpg')
         cave.set_texture(tex)
-        tex = base.loader.load_texture('textures/tile2.jpg')
+        tex = base.loader.load_texture('textures/tile_07.jpg')
         gate.set_texture(tex)
 
 
 class Terrain(NodePath):
 
-    def __init__(self, name, heightmap, height, tex_files, block_size=8, mask=1, shader=False):
+    def __init__(self, name, heightmap, height, tex_files, block_size=8, mask=1):
         super().__init__(BulletRigidBodyNode(f'terrain_{name}'))
         self.heightmap = heightmap
         self.height = height
         self.block_size = block_size
 
-        self.use_shader = shader
-
         self.node().set_mass(0)
         self.set_collide_mask(BitMask32.bit(mask))
-        # shape = BulletHeightfieldShape(base.loader.load_texture(self.heightmap), self.height, ZUp)
-        img = PNMImage(Filename(self.heightmap))
-        shape = BulletHeightfieldShape(img, self.height, ZUp)
+        shape = BulletHeightfieldShape(base.loader.load_texture(self.heightmap), self.height, ZUp)
         shape.set_use_diamond_subdivision(True)
         self.node().add_shape(shape)
         self.generate_terrain(tex_files)
@@ -347,10 +340,8 @@ class Terrain(NodePath):
         self.terrain.set_focal_point(base.camera)
 
         size_x, size_y = img.get_size()
-        x = (size_x - 1) / 2
-        y = (size_y - 1) / 2
-        # x = size_x / 2 - 0.5
-        # y = size_y / 2 - 0.5
+        x = size_x / 2 - 0.4
+        y = size_y / 2 - 0.4
 
         pos = Point3(-x, -y, -(self.height / 2))
         self.root = self.terrain.get_root()
@@ -359,11 +350,9 @@ class Terrain(NodePath):
         self.terrain.generate()
         self.root.reparent_to(self)
 
-        if self.use_shader:
-            shader = Shader.load(Shader.SL_GLSL, 'shaders/terrain_v2.glsl', 'shaders/terrain_f2.glsl')
-        else:
-            shader = Shader.load(Shader.SL_GLSL, 'shaders/terrain_v.glsl', 'shaders/terrain_f.glsl')
+        shader = Shader.load(Shader.SL_GLSL, 'shaders/terrain_v.glsl', 'shaders/terrain_f.glsl')
         self.root.set_shader(shader)
+        self.root.set_shader_input('heightmap', base.loader.load_texture(self.heightmap))
 
         for i, (file_name, tex_scale) in enumerate(tex_files):
             ts = TextureStage(f'ts{i}')
@@ -371,12 +360,6 @@ class Terrain(NodePath):
             self.root.set_shader_input(f'tex_ScaleFactor{i}', tex_scale)
             tex = base.loader.load_texture(f'textures/{file_name}')
             self.root.set_texture(ts, tex)
-
-        # i = 2
-        # ts = TextureStage(f'ts{i}')
-        # ts.set_sort(i)
-        self.root.set_shader_input('heightmap', base.loader.load_texture(self.heightmap))
-        # import pdb; pdb.set_trace()
 
     def make_hole(self, mx, my):
         # get the vertex data for an individual block in where hole is made.
@@ -389,6 +372,16 @@ class Terrain(NodePath):
         # set the vertex data to 0 for all the sides of the triangle to make it not visible.
         view = memoryview(v_array).cast('B').cast('f')
         view[:] = np.zeros(len(view), dtype=np.float32)
+
+
+class Sky(NodePath):
+
+    def __init__(self):
+        super().__init__(PandaNode('sky'))
+        self.blue_sky = base.loader.load_model('models/blue-sky/blue-sky-sphere')
+        self.blue_sky.reparent_to(self)
+        self.set_shader_off()
+        self.model = None
 
 
 class Scene:
@@ -408,20 +401,18 @@ class Scene:
 
     def create_terrains(self):
         tex_files = [
-            ('grass_02.png', 10),
-            ('stone_01.jpg', 10),
             ('grass_05.jpg', 10),
-            ('grass_01.jpg', 20),
+            ('grass_05.jpg', 20),
         ]
 
-        self.top_ground = Terrain('top_gd', 'top_ground.png', 10, tex_files, shader=True)
+        self.top_ground = Terrain('top_gd', 'top_ground.png', 10, tex_files)
         # self.top_ground.root.set_two_sided(True)
         self.attach_nature(self.top_ground)
         self.top_ground.set_z(-12)
 
         tex_files = [
-            ('stone_01.jpg', 10),
-            ('grass_03.jpg', 10),
+            ('stone_01.jpg', 20),
+            ('grass_04.jpg', 20),
         ]
         self.top_mountains = Terrain('top_mt', 'top_terrain.png', 100, tex_files, mask=2)
         self.top_mountains.root.set_two_sided(True)
@@ -440,8 +431,8 @@ class Scene:
         self.mid_ground.set_z(-56)   # -58
 
         tex_files = [
+            ('rock_02.jpg', 20),
             ('stone_01.jpg', 10),
-            ('grass_03.jpg', 10),
         ]
         self.mid_mountains = Terrain('mid_mt', 'mid_terrain.png', 100, tex_files, mask=2)
         self.mid_mountains.root.setTwoSided(True)
@@ -449,6 +440,9 @@ class Scene:
         self.mid_mountains.set_z(-48)
 
     def setup_environments(self):
+        self.sky = Sky()
+        self.sky.reparent_to(self.root)
+
         # tunnel on the top ground
         self.tunnel = SquareTunnel()
         self.attach_nature(self.tunnel)
@@ -500,8 +494,7 @@ class Scene:
 
         sensors = [
             ['basement_', 3.5, 12, Sensors.STEPS, Point3(-38.1466, -23.5, -58.26), Vec3(0, 55.5, 0)],  # steps in the basement
-            ['passage_', 1.5, 1.5, Sensors.MID_GROUND, Point3(-19.05, 17.6, -59.6), Vec3(0, 0, 0)],    # landing place of passage
-            # [1.5, 1.5, Sensors.HOLE, Point3(-19.05, 17.6, -56.4), Vec3(0, 0, 0)],
+            ['passage_', 1.5, 1.5, Sensors.MID_GROUND, Point3(-19.05, 17.6, -59.7), Vec3(0, 0, 0)],    # landing place of passage
         ]
 
         for i, (name, width, depth, sensor, pos, hpr) in enumerate(sensors):

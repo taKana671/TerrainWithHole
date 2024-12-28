@@ -3,10 +3,10 @@ from enum import Enum, auto
 from panda3d.core import BitMask32
 from direct.actor.Actor import Actor
 from panda3d.bullet import BulletCapsuleShape, ZUp
-from panda3d.bullet import BulletSphereShape
+from panda3d.bullet import BulletSphereShape, BulletBoxShape
 from panda3d.bullet import BulletRigidBodyNode
 from panda3d.core import PandaNode, NodePath, TransformState
-from panda3d.core import Vec2, Vec3, Point3
+from panda3d.core import Vec2, Vec3
 
 from scene import Sensors
 
@@ -34,11 +34,10 @@ class Walker(NodePath):
     RUN = 'run'
     WALK = 'walk'
 
-    def __init__(self, world):
+    def __init__(self):
         super().__init__(BulletRigidBodyNode('wolker'))
-        self.world = world
         self.test_shape = BulletSphereShape(0.5)
-        self.destination_nd = None
+
         self.responded_sensor = None
         self.status = Status.MOVE
 
@@ -51,7 +50,7 @@ class Walker(NodePath):
 
         self.set_collide_mask(BitMask32.bit(6) | BitMask32.bit(7))
         self.set_scale(0.5)
-        self.world.attach(self.node())
+        base.world.attach(self.node())
 
         self.direction_nd = NodePath(PandaNode('direction'))
         self.direction_nd.set_h(180)
@@ -66,20 +65,13 @@ class Walker(NodePath):
         self.actor.set_name('ralph')
         self.actor.reparent_to(self.direction_nd)
 
-    def navigate(self):
-        """Return a relative point to enable camera to follow a character
-           when camera's view is blocked by an object like walls.
-        """
-        return self.get_relative_point(self.direction_nd, Vec3(0, 10, 2))
-        # return self.get_relative_point(self.direction_nd, Vec3(0, 0, 5))
-
     def direction_relative_pos(self, pt):
         return self.get_relative_point(self.direction_nd, pt)
 
     def check_downward(self, from_pos, distance=-2.5):
         to_pos = from_pos + Vec3(0, 0, distance)
 
-        if (hit := self.world.ray_test_closest(
+        if (hit := base.world.ray_test_closest(
                 from_pos, to_pos, BitMask32.bit(1) | BitMask32.bit(3) | BitMask32.bit(6))).has_hit():
             # print('downward check', hit.get_node().get_name())
             return hit
@@ -89,9 +81,9 @@ class Walker(NodePath):
         ts_from = TransformState.make_pos(current_pos)
         ts_to = TransformState.make_pos(next_pos)
 
-        if (result := self.world.sweep_test_closest(
+        if (result := base.world.sweep_test_closest(
                 self.test_shape, ts_from, ts_to, BitMask32.bit(2) | BitMask32.bit(3), 0.0)).has_hit():
-            # print(result.get_node().get_name())
+            print('predicted collision', result.get_node().get_name())
             return result
 
     def parse_args(self, key_inputs):
@@ -123,32 +115,6 @@ class Walker(NodePath):
             return True
 
         self.set_z(self.get_z() - 20 * dt)
-
-    def update(self, dt, key_inputs):
-        motion, direction = self.parse_args(key_inputs)
-
-        match self.status:
-
-            case Status.FALLING:
-                motion = None
-                if self.land(dt):
-                    self.status = Status.MOVE
-
-            case Status.INTO_ROOM:
-                motion = None
-                if self.land(dt):
-                    print('end into_room')
-                    self.status = Status.IN_ROOM
-
-            case Status.MOVE:
-                self.turn(direction, dt)
-                self.move(direction, dt)
-
-            case Status.IN_ROOM:
-                self.turn(direction, dt)
-                self.move_inside(direction, dt)
-
-        self.play_anim(motion)
 
     def turn(self, direction, dt):
         if direction.x:
@@ -219,7 +185,6 @@ class Walker(NodePath):
 
             # Check that the collision with walls or other objects in the room will occur.
             if self.predict_collision(current_pos, next_pos):
-                # print('predict_collision')
                 return
 
             self.set_pos(next_pos)
@@ -244,3 +209,29 @@ class Walker(NodePath):
 
         if self.actor.get_current_anim() != anim:
             self.actor.loop(anim)
+
+    def update(self, dt, key_inputs):
+        motion, direction = self.parse_args(key_inputs)
+
+        match self.status:
+
+            case Status.FALLING:
+                motion = None
+                if self.land(dt):
+                    self.status = Status.MOVE
+
+            case Status.INTO_ROOM:
+                motion = None
+                if self.land(dt):
+                    print('end into_room')
+                    self.status = Status.IN_ROOM
+
+            case Status.MOVE:
+                self.turn(direction, dt)
+                self.move(direction, dt)
+
+            case Status.IN_ROOM:
+                self.turn(direction, dt)
+                self.move_inside(direction, dt)
+
+        self.play_anim(motion)

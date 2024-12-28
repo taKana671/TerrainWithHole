@@ -19,7 +19,6 @@ float computeWeight(float min_z, float max_z, vec4 vertex){
     return max(0.0, (region - abs(vertex.z - max_z)) / region);
 }
 
-
 void main() {
     vec4 tex0 = texture(p3d_Texture0, texcoord0.st * tex_ScaleFactor0).rgba;
     vec4 tex1 = texture(p3d_Texture1, texcoord1.st * tex_ScaleFactor1).rgba;
