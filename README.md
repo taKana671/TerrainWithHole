@@ -5,6 +5,14 @@ The second is to draw a shape on a hightmap by OpenCV, make the shape transparen
 The first way does not need to use 'discard' in shaders.
 And made it possible for the character to go through the hole by embedding a plane model under ground near the hole, and ignoring the collision between the character and terrain if the embedded plane model is detected by ray cast. 
 
+https://github.com/user-attachments/assets/c0bf91fe-2344-4a0d-bcf1-ba6def7ecaa2
+
+hole made by removing geometry data
+
+![demo](https://github.com/user-attachments/assets/71ecf7f0-f992-4eee-a41b-67349c005863)
+
+hole made by using heightmap
+
 # Requirements
 * Panda3D 1.10.14
 * numpy 2.1.2
