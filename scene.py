@@ -45,6 +45,11 @@ class ModelRoot(NodePath):
         shape.add_geom(model.node().get_geom(0))
         self.node().add_shape(shape)
 
+    def add_texture(self, img_file, target=None):
+        target = self if not target else target
+        tex = base.loader.load_texture(f'textures/{img_file}')
+        target.set_texture(tex)
+
 
 class Sensor(ModelRoot):
 
@@ -133,29 +138,21 @@ class SquareTunnel(AssembledModel):
         self.assemble_model()
 
     def assemble_model(self):
-        tunnel = NodePath('tunnel')
-        tunnel.reparent_to(self)
-        gate = NodePath('gate')
-        gate.reparent_to(self)
-
         # tunnel
         model = Box(width=4.5, depth=31, height=5, segs_w=5, segs_d=30, segs_z=5,
                     open_bottom=True, open_front=True, open_back=True).create()
         model.set_tex_scale(TextureStage.get_default(), 5, 1)
-        self.setup_model(model, 'tunnel', Point3(0.2, -0.8, -0.1), Vec3(51, 5, 0), parent=tunnel)
+        self.setup_model(model, 'tunnel', Point3(0.2, -0.8, -0.1), Vec3(51, 5, 0))
 
         # hollow rectangular prism that overlaps the hole in the mountain.
         maker = Box(width=6, depth=4, height=6, segs_w=6, segs_d=4, segs_z=6,
                     thickness=2, open_bottom=True, open_front=True, open_back=True)
 
-        self.setup_model(maker.create(), 'gate_1', Point3(13.0778, -10.635, -0.5477), Vec3(64, 0, 0), parent=gate)
-        self.setup_model(maker.create(), 'gate_2', Point3(-10.9222, 9.36504, 1.45235), Vec3(31, 0, 0), parent=gate)
+        self.setup_model(maker.create(), 'gate_1', Point3(13.0778, -10.635, -0.5477), Vec3(64, 0, 0))
+        self.setup_model(maker.create(), 'gate_2', Point3(-10.9222, 9.36504, 1.45235), Vec3(31, 0, 0))
 
         # set texture.
-        tex = base.loader.load_texture('textures/tile_07.jpg')
-        gate.set_texture(tex)
-        tex = base.loader.load_texture('textures/tile_06.jpg')
-        tunnel.set_texture(tex)
+        self.add_texture('tile2.jpg')
 
 
 class RoundTunnel(AssembledModel):
@@ -185,8 +182,7 @@ class RoundTunnel(AssembledModel):
         self.setup_model(model, 'wall', Point3(0, 0, -47.5), Vec3(0, 0, 0))
 
         # set texture.
-        tex = base.loader.load_texture('textures/metalboard.jpg')
-        self.set_texture(tex)
+        self.add_texture('metalboard.jpg')
 
 
 class Basement(AssembledModel):
@@ -230,10 +226,8 @@ class Basement(AssembledModel):
             self.setup_model(model, name, pos, hpr, parent=steps)
 
         # set_texture
-        tex = base.loader.load_texture('textures/tile2.jpg')
-        basement.set_texture(tex)
-        tex = base.loader.load_texture('textures/concrete_01.jpg')
-        steps.set_texture(tex)
+        for img_file, target in [('tile2.jpg', basement), ('concrete_01.jpg', steps)]:
+            self.add_texture(img_file, target)
 
         # room camera
         self.room_camera = NodePath('underground_room_camera')
@@ -309,10 +303,8 @@ class Cave(AssembledModel):
         pos = Point3(0, -depth / 2 + 3.1, 2)
         self.setup_model(model, 'gate', pos, Vec3(0, 0, 0), parent=gate)
 
-        tex = base.loader.load_texture('textures/concrete_01.jpg')
-        cave.set_texture(tex)
-        tex = base.loader.load_texture('textures/tile_07.jpg')
-        gate.set_texture(tex)
+        for img_file, target in [('concrete_01.jpg', cave), ('tile2.jpg', gate)]:
+            self.add_texture(img_file, target)
 
 
 class Terrain(NodePath):
@@ -331,6 +323,8 @@ class Terrain(NodePath):
         self.node().add_shape(shape)
         self.generate_terrain(tex_files)
 
+        self.name = name
+
     def generate_terrain(self, tex_files):
         img = PNMImage(Filename(self.heightmap))
         self.terrain = GeoMipTerrain('geomip_terrain')
@@ -339,10 +333,13 @@ class Terrain(NodePath):
         self.terrain.set_block_size(self.block_size)
         self.terrain.set_min_level(2)
         self.terrain.set_focal_point(base.camera)
+        self.terrain.setBruteforce("True")
 
         size_x, size_y = img.get_size()
-        x = size_x / 2 - 0.4
-        y = size_y / 2 - 0.4
+        x = (size_x - 1) / 2
+        y = (size_y - 1) / 2
+        # x = size_x / 2 - 0.4
+        # y = size_y / 2 - 0.4
 
         pos = Point3(-x, -y, -(self.height / 2))
         self.root = self.terrain.get_root()
@@ -354,7 +351,8 @@ class Terrain(NodePath):
         f_name = 'terrain_f' if self.discard else 'terrain_no_discard_f'
         shader = Shader.load(Shader.SL_GLSL, 'shaders/terrain_v.glsl', f'shaders/{f_name}.glsl')
         self.root.set_shader(shader)
-        self.root.set_shader_input('heightmap', base.loader.load_texture(self.heightmap))
+        if self.discard:
+            self.root.set_shader_input('heightmap', base.loader.load_texture(self.heightmap))
 
         for i, (file_name, tex_scale) in enumerate(tex_files):
             ts = TextureStage(f'ts{i}')
@@ -401,7 +399,7 @@ class Scene:
 
     def create_terrains(self):
         tex_files = [
-            ('grass_05.jpg', 10),
+            ('grass_05.jpg', 20),
             ('grass_05.jpg', 20),
         ]
 

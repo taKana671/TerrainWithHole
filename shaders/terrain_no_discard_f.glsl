@@ -6,7 +6,7 @@ uniform float tex_ScaleFactor1;
 uniform sampler2D p3d_Texture0;
 uniform sampler2D p3d_Texture1;
 
-uniform sampler2D heightmap;
+// uniform sampler2D heightmap;
 
 in vec2 texcoord0;
 in vec2 texcoord1;
@@ -23,7 +23,7 @@ void main() {
     vec4 tex0 = texture(p3d_Texture0, texcoord0.st * tex_ScaleFactor0).rgba;
     vec4 tex1 = texture(p3d_Texture1, texcoord1.st * tex_ScaleFactor1).rgba;
 
-    vec4 hm = texture(heightmap,texcoord0.st);
+    // vec4 hm = texture(heightmap,texcoord0.st);
 
     float scale = 300.0;
     float min_z = 0.0;
