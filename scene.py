@@ -11,7 +11,7 @@ from panda3d.core import Shader, TextureStage
 from panda3d.core import GeoMipTerrain, TransformState
 from panda3d.core import TransparencyAttrib
 
-from shapes.src import Sphere, Cylinder, Plane, Box
+from shapes import Sphere, Cylinder, Plane, Box
 
 
 class Sensors(Enum):

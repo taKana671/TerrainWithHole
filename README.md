@@ -22,9 +22,18 @@ hole made by using heightmap
 * Windows11
 
 # Usage
-* Execute a command below on your command line.
+
+* Clone this repository with submodule.
+
 ```
->>>python terrain_with_hole.py
+git clone --recursive https://github.com/taKana671/TerrainWithHole.git
+```
+
+* Execute a command below on your command line.
+
+```
+>cd TerrainWithHole
+>python terrain_with_hole.py
 ```
 # Controls:
 * Press [Esc] to quit.
